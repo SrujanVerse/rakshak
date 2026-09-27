@@ -559,6 +559,8 @@ class MainActivity : AppCompatActivity() {
                                 IncidentDecisionState.UNUSUAL_MOVEMENT -> tvHomeLiveStatus.setTextColor(0xFFFFB74D.toInt())
                                 IncidentDecisionState.POSSIBLE_IMPACT -> tvHomeLiveStatus.setTextColor(0xFFFF9800.toInt())
                                 IncidentDecisionState.POSSIBLE_INCIDENT -> tvHomeLiveStatus.setTextColor(0xFFFF5722.toInt())
+                                IncidentDecisionState.AWAITING_USER_CHECK -> tvHomeLiveStatus.setTextColor(0xFFFF9800.toInt())
+                                IncidentDecisionState.AWAITING_VERIFICATION -> tvHomeLiveStatus.setTextColor(0xFFFFC107.toInt())
                                 IncidentDecisionState.CONFIRMED_INCIDENT -> tvHomeLiveStatus.setTextColor(0xFFFF5252.toInt())
                             }
                         }

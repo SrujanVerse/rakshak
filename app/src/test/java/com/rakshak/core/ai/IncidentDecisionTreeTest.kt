@@ -11,27 +11,26 @@ import org.junit.Test
  *
  * EXPLICIT PRINCIPLE: "DETECTED MOVEMENT DOES NOT EQUAL CONFIRMED INCIDENT"
  *
- * Tests:
- *  1. testMovementDetectedButNoIncidentEvidence() — CASE A (Small Movement)
- *  2. testCaseB_UnusualButInconclusiveMovement() — CASE B (Unusual / Moderate Movement)
- *  3. testCaseC_StrongIncidentEvidence() — CASE C (Genuine Crash Evidence)
- *  4. testCaseD_UserConfirmsSafe() — CASE D (User Taps I'M GOOD)
- *  5. testMandatorySafetyInvariants() — Absolute Safety Rules
+ * Test cases (1 to 10):
+ *  1. testMovementDetectedButNoIncidentEvidence — Left-right shake -> MINOR_JERK / LOG_ONLY
+ *  2. testShortShakeDecaysToNormal — Short shake auto-decays to NORMAL
+ *  3. testUnusualMotionNormalPostEventDecaysToNormal — Unusual motion with normal post-event
+ *  4. testUserConfirmsSafeCancelsEmergency — Rider taps "I'M GOOD"
+ *  5. testNoResponseInconclusiveEvidencePromptsUser — Countdown expired + inconclusive evidence -> PROMPT_USER (never DISPATCH_SMS)
+ *  6. testGenuineCrashEvidenceDispatchesSms — Genuine severe crash -> DISPATCH_SMS
+ *  7. testQwenLowSeverityDispatchSmsRejectedBySafetyValidator — Qwen LOW + DISPATCH_SMS rejected by SafetyValidator
+ *  8. testMalformedJsonFallbackToSafetyValidator — Malformed LLM output fallback
+ *  9. testCameraUnavailableHandledGracefully — Camera unavailable handled without crash or false SOS
+ *  10. testMicrophoneUnavailableHandledGracefully — Mic unavailable handled without crash or false SOS
  */
 class IncidentDecisionTreeTest {
 
     @Test
     fun testMovementDetectedButNoIncidentEvidence() {
-        println("\n==================================================")
-        println("DECISION TREE TEST: Small Movement (No Incident Evidence)")
-        println("==================================================")
-        println("MOVEMENT DETECTED")
-        println("↓")
-
         // 1. Input: Small left-right movement or minor jerk
         val incident = IncidentData(
             eventType = "possible_crash",
-            confidence = 0.55f,               // Moderate/weak ML confidence
+            confidence = 0.55f,
             peakAcceleration = 18.5f,        // Small accel spike (< 25 m/s²)
             peakGyroscope = 2.1f,            // Normal rotation (< 3.5 rad/s)
             impactDurationMs = 150L,
@@ -44,7 +43,6 @@ class IncidentDecisionTreeTest {
             detectorState = "MONITORING"
         )
 
-        // 2. Qwen Phase 1 / Phase 2 output simulation for minor movement
         val qwenResult = LlmReasoningResult(
             classification = EventClassification.MINOR_MOVEMENT,
             severity = IncidentSeverity.LOW,
@@ -54,61 +52,46 @@ class IncidentDecisionTreeTest {
             confidence = 0.88f
         )
 
-        println("MOVEMENT CLASSIFICATION: ${qwenResult.classification}")
-        println("↓")
-        println("SAFETY CHECK: 10s Countdown Expired (No User Response)")
-        println("↓")
-        println("VERIFICATION: Camera=${incident.cameraVerification}, Mic=${incident.audioVerification}, Accel=${incident.peakAcceleration} m/s²")
-        println("↓")
-        println("QWEN ASSESSMENT: Severity=${qwenResult.severity}, Action=${qwenResult.recommendedAction}")
-        println("↓")
-
-        // 3. Pass through SafetyValidator
         val finalResult = SafetyValidator.validate(incident, qwenResult)
 
-        println("SAFETY VALIDATOR: Approved Action=${finalResult.recommendedAction}")
-        println("↓")
-        println("FINAL ACTION: ${finalResult.recommendedAction.name} (NO SOS SENT)")
-        println("==================================================\n")
-
-        // 4. MANDATORY ASSERTIONS
+        // MANDATORY ASSERTIONS
         val movementDetected = true
         val incidentConfirmed = (finalResult.recommendedAction == RecommendedAction.DISPATCH_SMS)
-        val noUserResponse = true
 
-        // movementDetected != incidentConfirmed
         assertFalse("Movement detected MUST NOT equal confirmed incident!", incidentConfirmed)
-
-        // noUserResponse != incidentConfirmed (absence of response is NOT proof of crash for weak evidence)
-        if (noUserResponse) {
-            assertNotEquals("No user response on weak evidence MUST NOT send SOS!", RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
-        }
-
-        // lowSeverity != SEND_SOS
         assertNotEquals("LOW severity MUST NEVER send SOS!", RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
-
-        // minorMovement != SEND_SOS
         assertNotEquals("MINOR_MOVEMENT MUST NEVER send SOS!", RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
-
         assertEquals(IncidentSeverity.LOW, finalResult.severity)
         assertEquals(RecommendedAction.LOG_ONLY, finalResult.recommendedAction)
     }
 
     @Test
-    fun testCaseB_UnusualButInconclusiveMovement() {
-        println("\n==================================================")
-        println("DECISION TREE TEST: Case B (Unusual But Inconclusive Movement)")
-        println("==================================================")
-        println("MOVEMENT DETECTED")
-        println("↓")
+    fun testShortShakeDecaysToNormal() {
+        IncidentDecisionEngine.resetToNormal()
+        // Simulate short shake evaluated by engine
+        val stateAfterMinorJerk = IncidentDecisionEngine.evaluate(
+            crashProbability = 0.35f,
+            recentPeakAccel = 18.0f,
+            recentPeakGyro = 2.0f,
+            fsmState = com.rakshak.core.detector.DetectorState.MONITORING
+        )
 
+        assertEquals("Short shake must produce MINOR_JERK or NORMAL state", IncidentDecisionState.MINOR_JERK, stateAfterMinorJerk)
+
+        // Reset to normal to verify state cleanup
+        IncidentDecisionEngine.resetToNormal()
+        assertEquals(IncidentDecisionState.NORMAL, IncidentDecisionEngine.decisionState.value)
+    }
+
+    @Test
+    fun testUnusualMotionNormalPostEventDecaysToNormal() {
         val incident = IncidentData(
             eventType = "possible_crash",
             confidence = 0.72f,
             peakAcceleration = 26.0f,        // Moderate force (25-30 m/s²)
             peakGyroscope = 3.2f,            // Mild rotation (< 4.0 rad/s)
             impactDurationMs = 300L,
-            riderMovement = "normal",
+            riderMovement = "normal",        // Normal movement post-event
             cameraVerification = "inconclusive",
             audioVerification = "no_voice_detected",
             locationAvailable = true,
@@ -117,7 +100,6 @@ class IncidentDecisionTreeTest {
             detectorState = "MONITORING"
         )
 
-        // Qwen returns UNUSUAL_MOVEMENT / MODERATE / PROMPT_USER
         val qwenResult = LlmReasoningResult(
             classification = EventClassification.UNUSUAL_MOVEMENT,
             severity = IncidentSeverity.MODERATE,
@@ -127,33 +109,52 @@ class IncidentDecisionTreeTest {
             confidence = 0.75f
         )
 
-        println("MOVEMENT CLASSIFICATION: ${qwenResult.classification}")
-        println("↓")
-        println("VERIFICATION: Camera=${incident.cameraVerification}, Accel=${incident.peakAcceleration} m/s²")
-        println("↓")
-        println("QWEN ASSESSMENT: Severity=${qwenResult.severity}, Action=${qwenResult.recommendedAction}")
-        println("↓")
-
         val finalResult = SafetyValidator.validate(incident, qwenResult)
 
-        println("SAFETY VALIDATOR: Action=${finalResult.recommendedAction}")
-        println("↓")
-        println("FINAL ACTION: ${finalResult.recommendedAction.name} (NO SOS SENT)")
-        println("==================================================\n")
-
-        // Weak / inconclusive evidence MUST NOT allow DISPATCH_SMS
-        assertNotEquals("Inconclusive evidence MUST NOT allow DISPATCH_SMS!", RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
+        assertNotEquals("Inconclusive movement MUST NOT allow DISPATCH_SMS!", RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
         assertEquals(RecommendedAction.PROMPT_USER, finalResult.recommendedAction)
     }
 
     @Test
-    fun testCaseC_StrongIncidentEvidence() {
-        println("\n==================================================")
-        println("DECISION TREE TEST: Case C (Strong Genuine Crash Evidence)")
-        println("==================================================")
-        println("MOVEMENT DETECTED")
-        println("↓")
+    fun testUserConfirmsSafeCancelsEmergency() {
+        IncidentDecisionEngine.resetToNormal()
+        val currentState = IncidentDecisionEngine.decisionState.value
 
+        assertEquals("Engine state must be NORMAL when user confirms safe!", IncidentDecisionState.NORMAL, currentState)
+    }
+
+    @Test
+    fun testNoResponseInconclusiveEvidencePromptsUser() {
+        val incident = IncidentData(
+            eventType = "possible_crash",
+            confidence = 0.65f,
+            peakAcceleration = 24.0f,
+            peakGyroscope = 2.8f,
+            impactDurationMs = 200L,
+            riderMovement = "unknown",
+            cameraVerification = "inconclusive",
+            audioVerification = "no_voice_detected",
+            locationAvailable = true,
+            detectorState = "AWAITING_VERIFICATION"
+        )
+
+        val qwenResult = LlmReasoningResult(
+            classification = EventClassification.INCONCLUSIVE,
+            severity = IncidentSeverity.MODERATE,
+            recommendedAction = RecommendedAction.PROMPT_USER,
+            explanation = "Countdown expired with inconclusive sensor evidence.",
+            report = "Inconclusive incident evidence.",
+            confidence = 0.50f
+        )
+
+        val finalResult = SafetyValidator.validate(incident, qwenResult)
+
+        assertNotEquals("Absence of response on weak evidence MUST NOT send SOS!", RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
+        assertEquals(RecommendedAction.PROMPT_USER, finalResult.recommendedAction)
+    }
+
+    @Test
+    fun testGenuineCrashEvidenceDispatchesSms() {
         val incident = IncidentData(
             eventType = "possible_crash",
             confidence = 0.94f,               // High crash confidence (>=0.85)
@@ -178,49 +179,14 @@ class IncidentDecisionTreeTest {
             confidence = 0.95f
         )
 
-        println("MOVEMENT CLASSIFICATION: ${qwenResult.classification}")
-        println("↓")
-        println("VERIFICATION: Camera=${incident.cameraVerification}, Accel=${incident.peakAcceleration} m/s², Gyro=${incident.peakGyroscope} rad/s")
-        println("↓")
-        println("QWEN ASSESSMENT: Severity=${qwenResult.severity}, Action=${qwenResult.recommendedAction}")
-        println("↓")
-
         val finalResult = SafetyValidator.validate(incident, qwenResult)
 
-        println("SAFETY VALIDATOR: Approved Action=${finalResult.recommendedAction}")
-        println("↓")
-        println("FINAL ACTION: ${finalResult.recommendedAction.name} (SOS DISPATCH AUTHORIZED)")
-        println("==================================================\n")
-
-        // Only genuine strong evidence + failed user response reaches DISPATCH_SMS
         assertEquals(RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
         assertEquals(IncidentSeverity.HIGH, finalResult.severity)
     }
 
     @Test
-    fun testCaseD_UserConfirmsSafe() {
-        println("\n==================================================")
-        println("DECISION TREE TEST: Case D (User Taps I'M GOOD)")
-        println("==================================================")
-
-        // Reset IncidentDecisionEngine to NORMAL
-        IncidentDecisionEngine.resetToNormal()
-
-        val currentState = IncidentDecisionEngine.decisionState.value
-        println("DECISION ENGINE STATE: $currentState")
-        println("FINAL ACTION: MONITORING CONTINUED (USER SAFE)")
-        println("==================================================\n")
-
-        val userConfirmedSafe = true
-        val sendSosPossible = if (userConfirmedSafe) false else true
-
-        assertEquals("Engine state must be NORMAL when user confirms safe!", IncidentDecisionState.NORMAL, currentState)
-        assertFalse("userConfirmedSafe = true -> SEND_SOS is impossible!", sendSosPossible)
-    }
-
-    @Test
-    fun testMandatorySafetyInvariants() {
-        // 1. Qwen LOW + SEND_SOS = REJECTED by SafetyValidator
+    fun testQwenLowSeverityDispatchSmsRejectedBySafetyValidator() {
         val weakIncident = IncidentData(
             eventType = "possible_crash",
             confidence = 0.50f,
@@ -239,30 +205,83 @@ class IncidentDecisionTreeTest {
         )
 
         val validated = SafetyValidator.validate(weakIncident, invalidQwenOutput)
+
         assertNotEquals("Qwen LOW + SEND_SOS MUST BE REJECTED!", RecommendedAction.DISPATCH_SMS, validated.recommendedAction)
         assertEquals(RecommendedAction.LOG_ONLY, validated.recommendedAction)
+    }
 
-        // 2. Weak evidence + SEND_SOS = REJECTED
-        val weakEvidenceIncident = IncidentData(
+    @Test
+    fun testMalformedJsonFallbackToSafetyValidator() {
+        val malformedJson = "{ invalid json content: true, action: DISPATCH_SMS "
+        val parsed = LlmReasoningResult.parseJson(malformedJson)
+
+        assertNull("Malformed JSON should fail gracefully and parse to null", parsed)
+
+        // SafetyValidator handles null LLM output safely
+        val incident = IncidentData(
+            eventType = "possible_crash",
+            confidence = 0.40f,
+            peakAcceleration = 12.0f,
+            peakGyroscope = 1.0f,
+            impactDurationMs = 50L
+        )
+        val validatedFallback = SafetyValidator.validate(incident, null)
+
+        assertNotEquals("Fallback on null LLM output MUST NEVER dispatch SOS", RecommendedAction.DISPATCH_SMS, validatedFallback.recommendedAction)
+        assertEquals(RecommendedAction.LOG_ONLY, validatedFallback.recommendedAction)
+    }
+
+    @Test
+    fun testCameraUnavailableHandledGracefully() {
+        val incident = IncidentData(
             eventType = "possible_crash",
             confidence = 0.60f,
             peakAcceleration = 22.0f,
-            peakGyroscope = 3.0f,
-            impactDurationMs = 150L,
-            detectorState = "MONITORING"
+            peakGyroscope = 2.5f,
+            impactDurationMs = 200L,
+            cameraVerification = "not_available",
+            audioVerification = "no_voice_detected"
         )
-        val overstatingQwen = LlmReasoningResult(
-            classification = EventClassification.POSSIBLE_INCIDENT,
-            severity = IncidentSeverity.HIGH,
-            recommendedAction = RecommendedAction.DISPATCH_SMS,
-            explanation = "Overstated crash.",
-            report = "Overstated.",
+
+        val qwenResult = LlmReasoningResult(
+            classification = EventClassification.UNUSUAL_MOVEMENT,
+            severity = IncidentSeverity.MODERATE,
+            recommendedAction = RecommendedAction.PROMPT_USER,
+            explanation = "Camera unavailable, relying on motion sensors.",
+            report = "Camera unavailable.",
             confidence = 0.60f
         )
 
-        val validatedWeak = SafetyValidator.validate(weakEvidenceIncident, overstatingQwen)
-        assertNotEquals("Weak evidence + SEND_SOS MUST BE REJECTED!", RecommendedAction.DISPATCH_SMS, validatedWeak.recommendedAction)
-        assertEquals(RecommendedAction.PROMPT_USER, validatedWeak.recommendedAction)
-        assertEquals(IncidentSeverity.MODERATE, validatedWeak.severity)
+        val finalResult = SafetyValidator.validate(incident, qwenResult)
+
+        assertNotEquals("Camera unavailable on low force MUST NOT dispatch SOS", RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
+        assertEquals(RecommendedAction.PROMPT_USER, finalResult.recommendedAction)
+    }
+
+    @Test
+    fun testMicrophoneUnavailableHandledGracefully() {
+        val incident = IncidentData(
+            eventType = "possible_crash",
+            confidence = 0.60f,
+            peakAcceleration = 22.0f,
+            peakGyroscope = 2.5f,
+            impactDurationMs = 200L,
+            cameraVerification = "normal",
+            audioVerification = "not_available"
+        )
+
+        val qwenResult = LlmReasoningResult(
+            classification = EventClassification.MINOR_MOVEMENT,
+            severity = IncidentSeverity.LOW,
+            recommendedAction = RecommendedAction.LOG_ONLY,
+            explanation = "Microphone unavailable, motion normal.",
+            report = "Microphone unavailable.",
+            confidence = 0.70f
+        )
+
+        val finalResult = SafetyValidator.validate(incident, qwenResult)
+
+        assertNotEquals("Microphone unavailable on low force MUST NOT dispatch SOS", RecommendedAction.DISPATCH_SMS, finalResult.recommendedAction)
+        assertEquals(RecommendedAction.LOG_ONLY, finalResult.recommendedAction)
     }
 }

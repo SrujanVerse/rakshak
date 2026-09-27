@@ -55,11 +55,19 @@ class NoOpReportGenerator : IncidentReportGenerator {
 
             val explanation = "Deterministic rule-based reasoning evaluation (confidence: ${incident.confidence}, peak acceleration: ${incident.peakAcceleration} m/s²)."
 
+            val classification = when {
+                isGenuineSevereCrash -> EventClassification.POSSIBLE_INCIDENT
+                incident.peakAcceleration >= 24.0f -> EventClassification.UNUSUAL_MOVEMENT
+                incident.peakAcceleration >= 15.0f -> EventClassification.MINOR_MOVEMENT
+                else -> EventClassification.NORMAL
+            }
+
             val rawReasoning = LlmReasoningResult(
                 severity = severity,
                 recommendedAction = action,
                 explanation = explanation,
                 report = report,
+                classification = classification,
             )
 
             return SafetyValidator.validate(incident, rawReasoning)

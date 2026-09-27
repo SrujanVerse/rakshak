@@ -14,7 +14,7 @@ object PromptBuilder {
 
 Output Contract (MUST follow exactly):
 {
-  "classification": "NORMAL" | "MINOR_MOVEMENT" | "UNUSUAL_MOVEMENT" | "POSSIBLE_INCIDENT",
+  "classification": "NORMAL" | "MINOR_MOVEMENT" | "UNUSUAL_MOVEMENT" | "INCONCLUSIVE" | "POSSIBLE_INCIDENT",
   "severity": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
   "action": "MONITOR" | "ASK_USER" | "VERIFY" | "SEND_SOS",
   "confidence": 0.0-1.0,
@@ -25,7 +25,8 @@ Interpretation Rules:
 1. NORMAL: Small tilt, ordinary handling. Severity: LOW. Action: MONITOR.
 2. MINOR_MOVEMENT: Left-right oscillation, brief movement spike (peakAccel < 25 m/s²). Severity: LOW. Action: MONITOR.
 3. UNUSUAL_MOVEMENT: Moderate force (25-32 m/s²) without tumble rotation. Severity: MEDIUM. Action: ASK_USER.
-4. POSSIBLE_INCIDENT: Severe impact (peakAccel >= 32 m/s²) + angular rotation (peakGyro >= 4 rad/s) + high crash probability. Severity: HIGH/CRITICAL. Action: VERIFY or SEND_SOS.
+4. INCONCLUSIVE: Motion is unusual but available verification evidence is inconclusive or missing. Severity: MEDIUM. Action: MONITOR or VERIFY (NEVER SEND_SOS).
+5. POSSIBLE_INCIDENT: Severe impact (peakAccel >= 32 m/s²) + angular rotation (peakGyro >= 4 rad/s) + high crash probability + unresponsive rider. Severity: HIGH/CRITICAL. Action: VERIFY or SEND_SOS.
 
 CRITICAL: Left-right phone shaking or brief motion spikes MUST be classified as MINOR_MOVEMENT with severity LOW and action MONITOR.
 Output ONLY valid JSON. No preambles, no markdown blocks."""

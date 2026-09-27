@@ -30,7 +30,13 @@ enum class IncidentDecisionState {
     /** Multiple independent signals confirm possible incident — needs verification */
     POSSIBLE_INCIDENT,
 
-    /** Strong multi-signal evidence confirmed — emergency countdown required */
+    /** Countdown active, awaiting rider safety confirmation */
+    AWAITING_USER_CHECK,
+
+    /** Countdown expired, actively gathering camera/voice/GPS verification */
+    AWAITING_VERIFICATION,
+
+    /** Strong multi-signal evidence confirmed — emergency SOS authorized */
     CONFIRMED_INCIDENT
 }
 
@@ -307,6 +313,10 @@ object IncidentDecisionEngine {
                 "⚠ Significant impact detected — analyzing..."
             IncidentDecisionState.POSSIBLE_INCIDENT ->
                 "⚠️ Possible incident — gathering evidence..."
+            IncidentDecisionState.AWAITING_USER_CHECK ->
+                "⚠️ Safety check active — tap I'M GOOD if safe!"
+            IncidentDecisionState.AWAITING_VERIFICATION ->
+                "🔍 Verifying incident status with local AI..."
             IncidentDecisionState.CONFIRMED_INCIDENT ->
                 "🚨 Incident confirmed — checking your safety!"
         }

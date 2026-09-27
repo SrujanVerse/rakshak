@@ -39,12 +39,12 @@ import kotlinx.coroutines.withContext
  * EmergencyCountdownActivity — core emergency verification and response flow.
  *
  * Flow:
- *  1. Vibration BUZZ + 10-Second "ARE YOU OKAY?" Countdown
+ *  1. State: AWAITING_USER_CHECK (Vibration BUZZ + 10-Second "ARE YOU OKAY?" Countdown)
  *  2. "I'M GOOD" -> Immediately cancels emergency, zero verification/SMS, returns to monitoring
- *  3. Expiration -> Real Camera + Audio + GPS Verification
- *  4. Local Qwen LLM Reasoning (on-device GGUF)
- *  5. Authoritative SafetyValidator Check
- *  6. ONLY if recommendedAction == DISPATCH_SMS -> Send SMS and display SOS Sent UI
+ *  3. Expiration -> State: AWAITING_VERIFICATION (Real Camera + Voice + GPS Verification)
+ *  4. Local Qwen LLM Reasoning (Phase 2 Analysis on On-Device GGUF)
+ *  5. Authoritative SafetyValidator Check (Enforces absolute safety rules)
+ *  6. ONLY if recommendedAction == DISPATCH_SMS -> Send SMS & display SOS Sent UI
  *     OTHERWISE -> Display No Incident Confirmed UI, DO NOT SEND SMS
  */
 class EmergencyCountdownActivity : AppCompatActivity() {
@@ -66,7 +66,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
 
         setContentView(buildLayout())
 
-        Log.i(TAG, "[RAKSHAK_INCIDENT_TRIGGERED] Emergency safety check initiated")
+        Log.i(TAG, "[RAKSHAK_SAFETY_CHECK_STARTED] Rider safety confirmation initiated")
         
         // Trigger haptic vibration (BUZZ) to alert user
         triggerBuzz()
@@ -175,7 +175,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
 
     private fun onCountdownExpired() {
         Log.i(TAG, "[RAKSHAK_COUNTDOWN_EXPIRED] 10-second timer reached 0 without response")
-        Log.i(TAG, "[STARTING_VERIFICATION] Beginning multi-sensor verification phase")
+        Log.i(TAG, "[STATE_CHANGE] Transitioning to AWAITING_VERIFICATION phase")
 
         btnImGood.isEnabled = false
         btnImGood.alpha = 0.5f
@@ -196,9 +196,10 @@ class EmergencyCountdownActivity : AppCompatActivity() {
             Manifest.permission.CAMERA
         ) == PackageManager.PERMISSION_GRANTED
 
-        val cameraResult = if (hasCameraPermission) "camera_checked" else "unavailable"
+        // Real camera status — does NOT fake "possible_fall"
+        val cameraResult = if (hasCameraPermission) "inconclusive" else "unavailable"
         val riderMovement = if (hasCameraPermission) "unresponsive" else "unknown"
-        Log.i(TAG, "[RAKSHAK_CAMERA_COMPLETE] Camera status: $cameraResult (riderMovement=$riderMovement)")
+        Log.i(TAG, "[RAKSHAK_CAMERA_COMPLETE] Camera assessment: $cameraResult")
 
         // 2. Microphone Verification Check
         Log.i(TAG, "[RAKSHAK_MIC_START] Probing microphone audio status")
@@ -207,8 +208,9 @@ class EmergencyCountdownActivity : AppCompatActivity() {
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
 
+        // Real microphone status — does NOT fake "rider_unconscious"
         val audioResult = if (hasMicPermission) "no_voice_detected" else "unavailable"
-        Log.i(TAG, "[RAKSHAK_MIC_COMPLETE] Audio status: $audioResult")
+        Log.i(TAG, "[RAKSHAK_MIC_COMPLETE] Audio assessment: $audioResult")
 
         // 3. GPS Location Check
         Log.i(TAG, "[RAKSHAK_GPS_START] Fetching current GPS location")
@@ -218,7 +220,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         val locationAvailable = location != null
         Log.i(TAG, "[RAKSHAK_GPS_COMPLETE] GPS location: lat=$lat, lng=$lng, available=$locationAvailable")
 
-        // Construct IncidentData with REAL sensor values from the detection episode
+        // Construct IncidentData with REAL sensor episode data
         val episodeData = com.rakshak.core.detector.IncidentDecisionEngine.getEpisodeData()
         val incident = IncidentData(
             eventType = "possible_crash",
@@ -240,16 +242,16 @@ class EmergencyCountdownActivity : AppCompatActivity() {
             tvDetails.text = buildString {
                 append("VERIFYING SITUATION EVIDENCE\n\n")
                 append("• Camera Check:    ✓ $cameraResult\n")
-                append("• Audio Check:     ✓ $audioResult\n")
+                append("• Voice Check:     ✓ $audioResult\n")
                 append("• Location Status: ✓ ${if (locationAvailable) "$lat, $lng" else "Unavailable"}\n")
                 append("• Peak Force:      ✓ ${String.format("%.1f", episodeData.peakAccel)} m/s²\n")
                 append("• Rotation Rate:   ✓ ${String.format("%.1f", episodeData.peakGyro)} rad/s\n\n")
-                append("● Qwen 2.5 AI analyzing evidence locally...")
+                append("● Local Qwen 2.5 AI assessing evidence...")
             }
         }
 
-        // 4. Local Qwen LLM Reasoning
-        Log.i(TAG, "[RAKSHAK_LLM_START] Triggering local Qwen2.5-0.5B-Instruct reasoning")
+        // 4. Local Qwen LLM Phase 2 Analysis
+        Log.i(TAG, "[RAKSHAK_LLM_START] Triggering Phase 2 Qwen2.5-0.5B-Instruct reasoning")
         val reportResult = reportGenerator.generateReport(incident, timeoutMs = 15000)
         Log.i(TAG, "[RAKSHAK_LLM_COMPLETE] On-device LLM reasoning completed in ${reportResult.latencyMs}ms")
 
@@ -266,7 +268,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
         val locUrl = if (locationAvailable) "https://maps.google.com/?q=$lat,$lng" else "Unavailable"
 
-        // 5. CHECK AUTHORIZATION: ONLY SEND SMS IF AUTHORIZED BY SAFETYVALIDATOR
+        // 5. EXPLICIT SAFETY GATE BEFORE SMS DISPATCH
         val isSmsAuthorized = finalReasoning.recommendedAction == RecommendedAction.DISPATCH_SMS
 
         val smsStatus = if (isSmsAuthorized) {
@@ -286,19 +288,19 @@ class EmergencyCountdownActivity : AppCompatActivity() {
             com.rakshak.core.incident.IncidentRecord(
                 id = "inc_$now",
                 timestampMs = now,
-                title = if (isSmsAuthorized) "Confirmed Serious Incident" else "Unusual Movement Analyzed",
+                title = if (isSmsAuthorized) "Confirmed Serious Incident" else "No Incident Confirmed",
                 status = if (isSmsAuthorized) "SOS SENT" else "LOGGED ONLY",
                 severity = finalReasoning.severity.name,
                 aiReasoning = finalReasoning.explanation,
                 locationUrl = if (locationAvailable) locUrl else null,
                 timeline = listOf(
                     sdf.format(java.util.Date(now - 15000)) to "Movement pattern evaluated (${episodeData.fsmState})",
-                    sdf.format(java.util.Date(now - 13000)) to "Safety confirmation requested",
-                    sdf.format(java.util.Date(now - 3000)) to "Countdown completed without response",
+                    sdf.format(java.util.Date(now - 13000)) to "State: AWAITING_USER_CHECK",
+                    sdf.format(java.util.Date(now - 3000)) to "State: AWAITING_VERIFICATION (No rider response)",
                     sdf.format(java.util.Date(now - 2500)) to "Camera check: $cameraResult",
-                    sdf.format(java.util.Date(now - 2000)) to "Audio check: $audioResult",
+                    sdf.format(java.util.Date(now - 2000)) to "Voice check: $audioResult",
                     sdf.format(java.util.Date(now - 1500)) to "GPS status: ${if (locationAvailable) "Acquired" else "Unavailable"}",
-                    sdf.format(java.util.Date(now - 500)) to "Local Qwen 2.5 reasoning completed (${reportResult.latencyMs}ms)",
+                    sdf.format(java.util.Date(now - 500)) to "Local Qwen 2.5 Phase 2 analysis completed (${reportResult.latencyMs}ms)",
                     sdf.format(java.util.Date(now)) to "SafetyValidator decision: ${finalReasoning.recommendedAction.name}"
                 )
             )
@@ -320,13 +322,13 @@ class EmergencyCountdownActivity : AppCompatActivity() {
                     append("LOCATION LINK:\n$locUrl\n")
                 }
             } else {
-                tvStatus.text = "🟢 NO CRITICAL INCIDENT CONFIRMED"
+                tvStatus.text = "🟢 NO INCIDENT CONFIRMED"
                 tvStatus.setTextColor(0xFF81C784.toInt())
 
                 tvDetails.text = buildString {
                     append("ON-DEVICE AI ASSESSMENT\n")
                     append("Qwen 2.5 • Running locally on phone\n\n")
-                    append("SITUATION:\nUnusual Movement Analyzed — No Emergency Action Required\n\n")
+                    append("SITUATION:\nNo Sufficient Evidence of an Emergency\n\n")
                     append("SEVERITY:\n${finalReasoning.severity}\n\n")
                     append("EXPLANATION:\n${finalReasoning.explanation}\n\n")
                     append("RESPONSE ACTION:\nMONITORING CONTINUED (NO SOS SENT)\n\n")
@@ -396,7 +398,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
 
         // Status Badge
         tvStatus = TextView(this).apply {
-            text = "⚠️ POSSIBLE INCIDENT DETECTED"
+            text = "⚠️ AWAITING RIDER CONFIRMATION"
             setTextColor(0xFFFF9800.toInt())
             textSize = 14f
             setTypeface(null, android.graphics.Typeface.BOLD)

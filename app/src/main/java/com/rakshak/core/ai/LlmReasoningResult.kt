@@ -27,19 +27,12 @@ enum class EventClassification {
     NORMAL,
     MINOR_MOVEMENT,
     UNUSUAL_MOVEMENT,
+    INCONCLUSIVE,
     POSSIBLE_INCIDENT
 }
 
 /**
  * LlmReasoningResult — structured output from the on-device LLM reasoning brain.
- *
- * Encapsulates:
- *  - [classification]: Movement event level
- *  - [severity]: Risk severity level
- *  - [recommendedAction]: Suggested action for the safety layer
- *  - [explanation]: Evidence-based rationale
- *  - [report]: Natural-language summary
- *  - [confidence]: Assessment confidence (0.0-1.0)
  */
 data class LlmReasoningResult(
     val severity: IncidentSeverity,
@@ -91,9 +84,10 @@ data class LlmReasoningResult(
                     ?: extractJsonValue(cleaned, "eventClassification")
                     ?: "NORMAL").uppercase()
                 val classification = when (classStr) {
-                    "MINOR", "MINOR_MOVEMENT" -> EventClassification.MINOR_MOVEMENT
+                    "MINOR", "MINOR_MOVEMENT", "MINOR_JERK" -> EventClassification.MINOR_MOVEMENT
                     "UNUSUAL", "UNUSUAL_MOVEMENT" -> EventClassification.UNUSUAL_MOVEMENT
-                    "POSSIBLE", "POSSIBLE_INCIDENT", "INCIDENT" -> EventClassification.POSSIBLE_INCIDENT
+                    "INCONCLUSIVE", "UNCERTAIN" -> EventClassification.INCONCLUSIVE
+                    "POSSIBLE", "POSSIBLE_INCIDENT", "INCIDENT", "SERIOUS_INCIDENT" -> EventClassification.POSSIBLE_INCIDENT
                     else -> EventClassification.NORMAL
                 }
 
@@ -117,7 +111,7 @@ data class LlmReasoningResult(
                     "SEND_SOS", "DISPATCH_SMS", "SOS" -> RecommendedAction.DISPATCH_SMS
                     "ASK_USER", "PROMPT_USER", "VERIFY" -> RecommendedAction.PROMPT_USER
                     "CANCEL", "CANCEL_ALERT" -> RecommendedAction.CANCEL_ALERT
-                    "LOG_ONLY", "LOG" -> RecommendedAction.LOG_ONLY
+                    "LOG_ONLY", "LOG", "MONITOR" -> RecommendedAction.LOG_ONLY
                     else -> RecommendedAction.PROMPT_USER
                 }
 

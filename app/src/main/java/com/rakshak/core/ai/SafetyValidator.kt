@@ -6,27 +6,55 @@ import com.rakshak.core.incident.IncidentData
  * SafetyValidator — authoritative deterministic safety boundary over LLM advisory output.
  *
  * ABSOLUTE SAFETY RULES:
- *  1. LOW severity MUST NEVER send SOS. If severity == LOW, action MUST be LOG_ONLY or CANCEL_ALERT or PROMPT_USER.
- *  2. DISPATCH_SMS is ONLY authorized when ALL 4 conditions are met:
+ *  1. NORMAL, MINOR_MOVEMENT, UNUSUAL_MOVEMENT, or INCONCLUSIVE classifications CAN NEVER SEND SOS.
+ *  2. LOW severity CAN NEVER SEND SOS.
+ *  3. Absence of rider response alone with inconclusive camera/voice evidence MUST NOT trigger SOS.
+ *  4. DISPATCH_SMS is ONLY authorized when ALL genuine crash criteria are satisfied:
  *     - Detector state is CONFIRMED / CONFIRMED_INCIDENT
  *     - Crash confidence >= 0.85f
- *     - Peak acceleration >= 32.0 m/s²
- *     - Peak gyroscope >= 4.0 rad/s
- *  3. Weak evidence (accel < 30 m/s², gyro < 3.5 rad/s, or confidence < 0.80) MUST NOT exceed MODERATE severity.
- *  4. Qwen is ADVISORY. SafetyValidator is AUTHORITATIVE.
+ *     - Peak acceleration >= 35.0 m/s²
+ *     - Peak gyroscope >= 5.0 rad/s
+ *     - Rider post-event movement is NOT "normal"
  */
 object SafetyValidator {
 
-    fun validate(incident: IncidentData, llmReasoning: LlmReasoningResult): LlmReasoningResult {
-        var validatedAction = llmReasoning.recommendedAction
-        var validatedSeverity = llmReasoning.severity
+    fun validate(incident: IncidentData, llmReasoning: LlmReasoningResult?): LlmReasoningResult {
+        val safeReasoning = llmReasoning ?: LlmReasoningResult(
+            classification = EventClassification.INCONCLUSIVE,
+            severity = IncidentSeverity.LOW,
+            recommendedAction = RecommendedAction.LOG_ONLY,
+            explanation = "LLM reasoning output unavailable or malformed. Falling back to safety rules.",
+            report = "Inconclusive assessment.",
+            confidence = 0.0f
+        )
 
-        // ── RULE 1: Weak evidence cap — prevent false positive escalation ──
-        val isWeakEvidence = incident.peakAcceleration < 30.0f ||
-                incident.confidence < 0.80f ||
-                incident.peakGyroscope < 3.5f
+        // Check if sensor evidence meets genuine severe emergency criteria
+        val meetsEmergencyCriteria = (incident.detectorState == "CONFIRMED" || incident.detectorState == "CONFIRMED_INCIDENT") &&
+                incident.confidence >= 0.85f &&
+                incident.peakAcceleration >= 35.0f &&
+                incident.peakGyroscope >= 5.0f &&
+                incident.riderMovement != "normal"
 
-        if (isWeakEvidence) {
+        if (meetsEmergencyCriteria) {
+            val finalSeverity = if (safeReasoning.severity == IncidentSeverity.CRITICAL) IncidentSeverity.CRITICAL else IncidentSeverity.HIGH
+            return safeReasoning.copy(
+                severity = finalSeverity,
+                recommendedAction = RecommendedAction.DISPATCH_SMS,
+                classification = EventClassification.POSSIBLE_INCIDENT
+            )
+        }
+
+        var validatedAction = safeReasoning.recommendedAction
+        var validatedSeverity = safeReasoning.severity
+        val classification = safeReasoning.classification
+
+        // ── RULE 1: Non-incident & Inconclusive Classification Guard ──
+        val isNonIncidentClass = classification == EventClassification.NORMAL ||
+                classification == EventClassification.MINOR_MOVEMENT ||
+                classification == EventClassification.UNUSUAL_MOVEMENT ||
+                classification == EventClassification.INCONCLUSIVE
+
+        if (isNonIncidentClass) {
             if (validatedSeverity == IncidentSeverity.HIGH || validatedSeverity == IncidentSeverity.CRITICAL) {
                 validatedSeverity = IncidentSeverity.MODERATE
             }
@@ -35,16 +63,21 @@ object SafetyValidator {
             }
         }
 
-        // ── RULE 2: ABSOLUTE GUARD ON DISPATCH_SMS ──
-        // DISPATCH_SMS is ONLY permitted if ALL genuine crash criteria are satisfied
-        val meetsEmergencyCriteria = (incident.detectorState == "CONFIRMED" || incident.detectorState == "CONFIRMED_INCIDENT") &&
-                incident.confidence >= 0.85f &&
-                incident.peakAcceleration >= 32.0f &&
-                incident.peakGyroscope >= 4.0f
+        // ── RULE 2: Weak / Inconclusive Evidence Cap ──
+        val isWeakEvidence = incident.peakAcceleration < 35.0f ||
+                incident.confidence < 0.85f ||
+                incident.peakGyroscope < 4.0f ||
+                incident.cameraVerification == "inconclusive" ||
+                incident.cameraVerification == "unavailable" ||
+                incident.audioVerification == "unavailable"
 
-        if (validatedAction == RecommendedAction.DISPATCH_SMS && !meetsEmergencyCriteria) {
-            // Downgrade action — evidence does not justify SMS alert
-            validatedAction = if (validatedSeverity == IncidentSeverity.LOW) RecommendedAction.LOG_ONLY else RecommendedAction.PROMPT_USER
+        if (isWeakEvidence) {
+            if (validatedAction == RecommendedAction.DISPATCH_SMS) {
+                validatedAction = if (validatedSeverity == IncidentSeverity.LOW) RecommendedAction.LOG_ONLY else RecommendedAction.PROMPT_USER
+            }
+            if (validatedSeverity == IncidentSeverity.CRITICAL || validatedSeverity == IncidentSeverity.HIGH) {
+                validatedSeverity = IncidentSeverity.MODERATE
+            }
         }
 
         // ── RULE 3: LOW SEVERITY CAN NEVER SEND SOS ──
@@ -52,15 +85,10 @@ object SafetyValidator {
             validatedAction = RecommendedAction.LOG_ONLY
         }
 
-        // ── RULE 4: Confirmed genuine severe crash enforces minimum HIGH severity ──
-        if (meetsEmergencyCriteria && (validatedSeverity == IncidentSeverity.LOW || validatedSeverity == IncidentSeverity.MODERATE)) {
-            validatedSeverity = IncidentSeverity.HIGH
-            validatedAction = RecommendedAction.DISPATCH_SMS
-        }
-
-        return llmReasoning.copy(
+        return safeReasoning.copy(
             severity = validatedSeverity,
             recommendedAction = validatedAction,
+            classification = classification,
         )
     }
 }
