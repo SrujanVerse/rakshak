@@ -3,40 +3,68 @@ package com.rakshak.core.ai
 import com.rakshak.core.incident.IncidentData
 
 /**
- * PromptBuilder — constructs LLM reasoning prompts from structured IncidentData.
+ * PromptBuilder — constructs ChatML prompts for Qwen on-device LLM.
  *
- * Uses the Qwen2.5 ChatML format (<|im_start|>/<|im_end|>).
- * System prompt instructs the LLM to act as the on-device reasoning brain and output ONLY valid JSON.
- *
- * CRITICAL: The prompt explicitly instructs the LLM to correlate severity with actual evidence strength.
- * Weak evidence (low acceleration, low confidence) MUST produce LOW/MODERATE severity — never HIGH.
+ * Phase 1: Event Interpretation — evaluates raw sensor evidence episode.
+ * Phase 2: Verification Analysis — evaluates multi-sensor verification evidence after countdown expiration.
  */
 object PromptBuilder {
 
-    private const val SYSTEM_PROMPT = """You are an on-device safety reasoning brain for a two-wheeler incident detection system. Given structured incident data as JSON, analyze the combined evidence and return a single valid JSON object.
+    private const val SYSTEM_PROMPT = """You are an on-device safety reasoning brain for a two-wheeler incident detection system. Given structured movement evidence as JSON, interpret the event and return a single valid JSON object.
 
-Rules:
-- Output ONLY a single JSON object. Do not output markdown code blocks, explanation text, or preambles outside the JSON.
-- The JSON object MUST contain these 4 fields:
-  1. "severity": "LOW" | "MODERATE" | "HIGH" | "CRITICAL"
-  2. "recommended_action": "DISPATCH_SMS" | "PROMPT_USER" | "LOG_ONLY" | "CANCEL_ALERT"
-  3. "explanation": A concise 1-sentence rationale for your evaluation.
-  4. "report": A concise 2-sentence factual incident report.
+Output Contract (MUST follow exactly):
+{
+  "classification": "NORMAL" | "MINOR_MOVEMENT" | "UNUSUAL_MOVEMENT" | "POSSIBLE_INCIDENT",
+  "severity": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+  "action": "MONITOR" | "ASK_USER" | "VERIFY" | "SEND_SOS",
+  "confidence": 0.0-1.0,
+  "reason": "1-sentence evidence-based explanation"
+}
 
-SEVERITY RULES (YOU MUST FOLLOW THESE):
-- LOW: peak_acceleration < 20 m/s² OR confidence < 0.5. Action: LOG_ONLY or CANCEL_ALERT.
-- MODERATE: peak_acceleration 20-30 m/s² AND confidence 0.5-0.8. Action: PROMPT_USER or LOG_ONLY.
-- HIGH: peak_acceleration >= 30 m/s² AND confidence >= 0.8 AND rider_movement is "limited". Action: PROMPT_USER or DISPATCH_SMS.
-- CRITICAL: peak_acceleration >= 35 m/s² AND confidence >= 0.9 AND no voice detected AND rider unresponsive. Action: DISPATCH_SMS.
+Interpretation Rules:
+1. NORMAL: Small tilt, ordinary handling. Severity: LOW. Action: MONITOR.
+2. MINOR_MOVEMENT: Left-right oscillation, brief movement spike (peakAccel < 25 m/s²). Severity: LOW. Action: MONITOR.
+3. UNUSUAL_MOVEMENT: Moderate force (25-32 m/s²) without tumble rotation. Severity: MEDIUM. Action: ASK_USER.
+4. POSSIBLE_INCIDENT: Severe impact (peakAccel >= 32 m/s²) + angular rotation (peakGyro >= 4 rad/s) + high crash probability. Severity: HIGH/CRITICAL. Action: VERIFY or SEND_SOS.
 
-DO NOT assign HIGH or CRITICAL severity when the evidence is weak (low acceleration, low confidence, or normal rider movement).
-A small phone movement or brief jerk with peak_acceleration < 25 m/s² is ALWAYS LOW severity.
-
-- Base your evaluation ONLY on the input data. Do NOT invent sensor readings, GPS coordinates, medical conditions, or events not in the input.
-- Keep the entire JSON under 100 words."""
+CRITICAL: Left-right phone shaking or brief motion spikes MUST be classified as MINOR_MOVEMENT with severity LOW and action MONITOR.
+Output ONLY valid JSON. No preambles, no markdown blocks."""
 
     /**
-     * Build a complete ChatML prompt for the LLM from incident data.
+     * Build Phase 1 ChatML prompt for Qwen Event Interpreter.
+     */
+    fun buildEventInterpretationPrompt(
+        peakAccel: Float,
+        peakGyro: Float,
+        durationMs: Long,
+        pattern: String,
+        postMovement: String,
+        tfliteProb: Float
+    ): String {
+        val jsonInput = """
+        {
+          "eventDurationMs": $durationMs,
+          "peakAcceleration": ${String.format("%.1f", peakAccel)},
+          "peakGyroscope": ${String.format("%.1f", peakGyro)},
+          "movementPattern": "$pattern",
+          "postEventMovement": "$postMovement",
+          "tfliteCrashProbability": ${String.format("%.2f", tfliteProb)}
+        }
+        """.trimIndent()
+
+        return buildString {
+            append("<|im_start|>system\n")
+            append(SYSTEM_PROMPT)
+            append("<|im_end|>\n")
+            append("<|im_start|>user\n")
+            append(jsonInput)
+            append("<|im_end|>\n")
+            append("<|im_start|>assistant\n")
+        }
+    }
+
+    /**
+     * Build Phase 2 ChatML prompt for Qwen Verification Analysis.
      */
     fun buildPrompt(incident: IncidentData): String {
         return buildString {
@@ -51,11 +79,11 @@ A small phone movement or brief jerk with peak_acceleration < 25 m/s² is ALWAYS
     }
 
     /**
-     * Build a simple prompt without ChatML formatting for debugging.
+     * Simple prompt fallback.
      */
     fun buildSimplePrompt(incident: IncidentData): String {
         return buildString {
-            append("Analyze this incident data and return a JSON object with severity, recommended_action, explanation, and report:\n\n")
+            append("Analyze this incident data and return a JSON object with classification, severity, action, confidence, and reason:\n\n")
             append(incident.toJsonString())
             append("\n\nJSON:")
         }

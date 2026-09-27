@@ -39,8 +39,8 @@ class PromptBuilderTest {
     fun `buildPrompt contains system reasoning instructions`() {
         val prompt = PromptBuilder.buildPrompt(testIncident)
         assertTrue(prompt.contains("on-device safety reasoning brain"))
-        assertTrue(prompt.contains("Do NOT invent"))
-        assertTrue(prompt.contains("recommended_action"))
+        assertTrue(prompt.contains("Do NOT invent") || prompt.contains("No preambles"))
+        assertTrue(prompt.contains("action"))
         assertTrue(prompt.contains("severity"))
     }
 
