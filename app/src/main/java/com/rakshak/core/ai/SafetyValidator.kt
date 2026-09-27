@@ -31,7 +31,7 @@ object SafetyValidator {
                 validatedSeverity = IncidentSeverity.MODERATE
             }
             if (validatedAction == RecommendedAction.DISPATCH_SMS) {
-                validatedAction = RecommendedAction.PROMPT_USER
+                validatedAction = if (validatedSeverity == IncidentSeverity.LOW) RecommendedAction.LOG_ONLY else RecommendedAction.PROMPT_USER
             }
         }
 
