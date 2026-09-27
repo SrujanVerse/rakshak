@@ -106,11 +106,11 @@ class LlmReasoningResultTest {
     }
 
     @Test
-    fun `SafetyValidator upgrades severe acceleration to at least HIGH severity`() {
+    fun `SafetyValidator upgrades severe acceleration with high confidence to at least HIGH severity`() {
         val incident = IncidentData(
             eventType = "possible_crash",
-            confidence = 0.5f,
-            peakAcceleration = 35.0f, // Severe impact force
+            confidence = 0.88f,
+            peakAcceleration = 36.0f, // Severe impact force + high confidence
             peakGyroscope = 10.0f,
             impactDurationMs = 200L,
             detectorState = "MONITORING",
@@ -124,6 +124,28 @@ class LlmReasoningResultTest {
 
         val validated = SafetyValidator.validate(incident, llmResult)
         assertEquals(IncidentSeverity.HIGH, validated.severity)
+    }
+
+    @Test
+    fun `SafetyValidator caps weak evidence severity to MODERATE and prevents DISPATCH_SMS`() {
+        val incident = IncidentData(
+            eventType = "possible_crash",
+            confidence = 0.65f, // Weak confidence
+            peakAcceleration = 22.0f, // Moderate accel (e.g. phone shake)
+            peakGyroscope = 3.0f,
+            impactDurationMs = 100L,
+            detectorState = "MONITORING",
+        )
+        val llmResultOverstating = LlmReasoningResult(
+            severity = IncidentSeverity.HIGH,
+            recommendedAction = RecommendedAction.DISPATCH_SMS,
+            explanation = "Potential crash suspected.",
+            report = "Crash reported.",
+        )
+
+        val validated = SafetyValidator.validate(incident, llmResultOverstating)
+        assertEquals(IncidentSeverity.MODERATE, validated.severity)
+        assertEquals(RecommendedAction.PROMPT_USER, validated.recommendedAction)
     }
 
     @Test
