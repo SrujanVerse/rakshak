@@ -32,6 +32,8 @@ import com.rakshak.core.ai.RecommendedAction
 import com.rakshak.core.ai.SafetyValidator
 import com.rakshak.core.ai.llm.LlamaAndroidEngine
 import com.rakshak.core.incident.IncidentData
+import com.rakshak.core.incident.IncidentCountdownManager
+import com.rakshak.core.incident.CountdownStatus
 import com.rakshak.core.verification.CameraVerificationEngine
 import com.rakshak.core.verification.IncidentVerificationData
 import com.rakshak.core.verification.VoiceVerificationEngine
@@ -126,52 +128,61 @@ class EmergencyCountdownActivity : AppCompatActivity() {
 
     private fun startCountdown() {
         Log.i(TAG, "[$incidentId] [02] COUNTDOWN_STARTED 10-second countdown active")
-        val durationMs = if (intent.getBooleanExtra("auto_expire", false)) 500L else 10000L
-        countDownTimer = object : CountDownTimer(durationMs, 500) {
-            override fun onTick(millisUntilFinished: Long) {
-                if (isCancelled) return
-                val seconds = (millisUntilFinished / 1000).toInt() + 1
-                tvTimer.text = seconds.toString()
-            }
+        val autoExpire = intent.getBooleanExtra("auto_expire", false)
 
-            override fun onFinish() {
-                if (isCancelled) return
-                tvTimer.text = "0"
-                onCountdownExpired()
+        val currentState = IncidentCountdownManager.state.value
+        if (currentState.status != CountdownStatus.RUNNING) {
+            IncidentCountdownManager.startCountdown(
+                context = applicationContext,
+                incidentId = incidentId,
+                autoExpire = autoExpire,
+                onExpired = {
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        onCountdownExpired()
+                    }
+                },
+                onCancelled = {
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        showCancelledUi()
+                    }
+                }
+            )
+        }
+
+        lifecycleScope.launch {
+            IncidentCountdownManager.state.collect { state ->
+                if (isCancelled) return@collect
+                when (state.status) {
+                    CountdownStatus.RUNNING -> {
+                        tvTimer.text = state.remainingSeconds.toString()
+                    }
+                    CountdownStatus.EXPIRED -> {
+                        tvTimer.text = "0"
+                        if (verificationJob == null && !isCancelled) {
+                            onCountdownExpired()
+                        }
+                    }
+                    CountdownStatus.CANCELLED -> {
+                        showCancelledUi()
+                    }
+                    CountdownStatus.IDLE -> {}
+                }
             }
-        }.start()
+        }
     }
 
     private fun onImGoodPressed() {
         isCancelled = true
-        countDownTimer?.cancel()
         verificationJob?.cancel()
-
         cameraEngine.closeCameras()
 
         Log.i(TAG, "[$incidentId] [03] RIDER_RESPONSE Rider pressed I'M OKAY. Cancelling emergency workflow.")
-        com.rakshak.core.detector.IncidentDecisionEngine.resetToNormal()
+        IncidentCountdownManager.cancelCountdown(applicationContext, "IN_APP_BUTTON")
+        showCancelledUi()
+    }
 
-        val now = System.currentTimeMillis()
-        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-        com.rakshak.core.incident.IncidentRepository.addRecord(
-            applicationContext,
-            com.rakshak.core.incident.IncidentRecord(
-                id = incidentId,
-                timestampMs = now,
-                title = "Movement Anomaly — Resolved",
-                status = "RESOLVED BY RIDER",
-                severity = "LOW",
-                aiReasoning = "Incident safety check initiated. User tapped 'I'M OKAY'. Alert cancelled by rider with zero emergency actions taken.",
-                locationUrl = null,
-                timeline = listOf(
-                    sdf.format(java.util.Date(now - 10000)) to "Unusual movement pattern detected",
-                    sdf.format(java.util.Date(now - 8000)) to "Safety countdown requested",
-                    sdf.format(java.util.Date(now)) to "Rider tapped I'M OKAY — Incident cancelled"
-                )
-            )
-        )
-
+    private fun showCancelledUi() {
+        isCancelled = true
         tvStatus.text = "✓ YOU'RE SAFE"
         tvStatus.setTextColor(0xFF4CAF50.toInt())
         tvTimer.text = "CANCELLED"
@@ -192,6 +203,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
     }
 
     private fun onCountdownExpired() {
+        if (verificationJob != null) return
         Log.i(TAG, "[$incidentId] [04] VERIFICATION_STARTED 10-second timer reached 0 without response")
 
         tvStatus.text = "🔍 CHECKING YOUR SITUATION..."

@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- Notifications and Vibration for incident countdown alert -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Phone state: Detect cellular service availability (P0 readiness check) -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
@@ -60,6 +64,10 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="crash_detection" />
         </service>
+
+        <receiver
+            android:name=".core.incident.IncidentCancelReceiver"
+            android:exported="false" />
 
         <!-- MainActivity: System Readiness screen + mode switch -->
         <activity

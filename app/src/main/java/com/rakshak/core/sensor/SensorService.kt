@@ -24,6 +24,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+import android.app.PendingIntent
+import com.rakshak.core.incident.IncidentCancelReceiver
+import com.rakshak.core.incident.IncidentCountdownManager
+import com.rakshak.core.incident.CountdownStatus
+
 /**
  * Foreground service that continuously reads Accelerometer and Gyroscope
  * at SENSOR_DELAY_GAME (~50Hz) and executes real-time TFLite crash classification.
@@ -54,6 +59,8 @@ class SensorService : Service(), SensorEventListener {
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
+        createNotificationChannels()
+
         // Initialize and load TFLite classifier safely (handles missing native libraries in test environments)
         try {
             classifier = TFLiteCrashClassifier(applicationContext)
@@ -67,7 +74,22 @@ class SensorService : Service(), SensorEventListener {
         CoroutineScope(Dispatchers.Main).launch {
             com.rakshak.core.detector.IncidentDecisionEngine.decisionState.collect { decision ->
                 if (decision == com.rakshak.core.detector.IncidentDecisionState.CONFIRMED_INCIDENT) {
-                    Log.w(TAG, "[RAKSHAK_INCIDENT_CONFIRMED] Multi-signal gate CONFIRMED. Launching EmergencyCountdownActivity.")
+                    Log.w(TAG, "[RAKSHAK_INCIDENT_CONFIRMED] Multi-signal gate CONFIRMED. Triggering background countdown & notification.")
+                    
+                    // Start authoritative single countdown state
+                    IncidentCountdownManager.startCountdown(
+                        context = applicationContext,
+                        onTick = { remainingSecs ->
+                            updateIncidentCountdownNotification(remainingSecs)
+                        },
+                        onExpired = {
+                            showNormalMonitoringNotification()
+                        },
+                        onCancelled = {
+                            showNormalMonitoringNotification()
+                        }
+                    )
+
                     val emergencyIntent = Intent(applicationContext, com.rakshak.ui.emergency.EmergencyCountdownActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     }
@@ -78,7 +100,12 @@ class SensorService : Service(), SensorEventListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundSpecialUse()
+        if (intent?.action == ACTION_REVERT_NORMAL_NOTIFICATION) {
+            Log.i(TAG, "Received ACTION_REVERT_NORMAL_NOTIFICATION — reverting to persistent monitoring notification.")
+            showNormalMonitoringNotification()
+        } else {
+            startForegroundSpecialUse()
+        }
         
         if (!isListening) {
             if (accelerometer != null) {
@@ -98,29 +125,36 @@ class SensorService : Service(), SensorEventListener {
         return START_STICKY
     }
 
-    private fun startForegroundSpecialUse() {
-        val channelId = "rakshak_sensor_channel"
-        val channelName = "Crash Detection Sensor"
-        
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val chan = NotificationChannel(
-                channelId,
-                channelName,
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            // Channel 1: Normal Monitoring (Low Priority)
+            val sensorChan = NotificationChannel(
+                SENSOR_CHANNEL_ID,
+                "Crash Detection Sensor",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps crash detection sensors running"
+                description = "Keeps crash detection sensors running persistently in background"
             }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(chan)
+            manager.createNotificationChannel(sensorChan)
+
+            // Channel 2: High Priority Emergency Incident Alert
+            val incidentChan = NotificationChannel(
+                INCIDENT_CHANNEL_ID,
+                "Emergency Incident Alert",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "High priority live notification for rider safety check countdown"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                enableVibration(true)
+            }
+            manager.createNotificationChannel(incidentChan)
         }
+    }
 
-        val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Rakshak Crash Detection")
-            .setContentText("Monitoring sensors & running TFLite inference...")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
+    private fun startForegroundSpecialUse() {
+        val notification = buildNormalMonitoringNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID, 
@@ -130,6 +164,66 @@ class SensorService : Service(), SensorEventListener {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+    }
+
+    fun showNormalMonitoringNotification() {
+        val notification = buildNormalMonitoringNotification()
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun buildNormalMonitoringNotification(): Notification {
+        return NotificationCompat.Builder(this, SENSOR_CHANNEL_ID)
+            .setContentTitle("RAKSHAK")
+            .setContentText("🛡 Protection Active — Monitoring rider safety")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+    }
+
+    fun updateIncidentCountdownNotification(remainingSeconds: Int) {
+        val cancelIntent = Intent(this, IncidentCancelReceiver::class.java)
+        val cancelPendingIntent = PendingIntent.getBroadcast(
+            this,
+            0,
+            cancelIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val activityIntent = Intent(this, com.rakshak.ui.emergency.EmergencyCountdownActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        val activityPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            activityIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, INCIDENT_CHANNEL_ID)
+            .setContentTitle("RAKSHAK")
+            .setContentText("⚠️ POSSIBLE INCIDENT DETECTED — $remainingSeconds seconds remaining")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(
+                "⚠️ POSSIBLE INCIDENT DETECTED\nAre you okay?\n\nTime remaining: $remainingSeconds seconds"
+            ))
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true) // Sound and vibration fire ONCE at start, silent on per-second ticks
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(activityPendingIntent)
+            .setFullScreenIntent(activityPendingIntent, false)
+            .addAction(
+                R.drawable.ic_launcher_foreground,
+                "I'M OKAY",
+                cancelPendingIntent
+            )
+            .build()
+
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, notification)
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -246,5 +340,9 @@ class SensorService : Service(), SensorEventListener {
         private const val NOTIFICATION_ID = 1001
         private const val INFERENCE_INTERVAL_MS = 500L
         private const val CRASH_THRESHOLD = 0.85f
+
+        const val ACTION_REVERT_NORMAL_NOTIFICATION = "com.rakshak.ACTION_REVERT_NORMAL"
+        const val SENSOR_CHANNEL_ID = "rakshak_sensor_channel"
+        const val INCIDENT_CHANNEL_ID = "rakshak_incident_channel"
     }
 }
