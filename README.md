@@ -1,128 +1,80 @@
-# RAKSHAK 🛡️
-### On-Device Crash Detection for Two-Wheeler Riders
+# RAKSHAK — On-Device AI Two-Wheeler Safety Companion
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![Min SDK](https://img.shields.io/badge/minSdk-26-blue)]()
-[![Mode](https://img.shields.io/badge/DEMO%20MODE-enabled-orange)]()
+RAKSHAK is an on-device AI safety system designed for two-wheeler riders. It combines continuous 50Hz sensor analysis, SisFall-trained 1D CNN crash classification, multi-signal safety gates, multi-sensor verification (Camera, Microphone, GPS), on-device `Qwen2.5-0.5B-Instruct` reasoning, and automated emergency SOS alerts.
 
 ---
 
-## Architecture
+## 🌟 Key Features
 
-```
-P0 (Safety-Critical)  ─── sense → detect → log → locate → alert
-                               │                            │
-                         [Sensor Path]              [Voice-SOS Path]
-                         (Accelerometer/            (Independent emergency
-                          Gyroscope)                 input — never depends
-                                                     on sensor path)
-
-P1 (Enrichment)       ─── Camera / Audio / AI   (starts AFTER alert in flight)
-P2 (Reporting)        ─── Dashboard / PDF        (starts AFTER alert in flight)
-```
-
-**Invariants enforced in code:**
-- P1/P2 failures can never delay or stop a P0 alert
-- SMS send is the highest-priority action in P0
-- Logging runs in parallel to SMS, never before it
-- Voice-SOS is an independent path reusing the same incident/alert pipeline
+- **Continuous 50Hz Sensor Monitoring**: Foreground service reading Accelerometer & Gyroscope sensors.
+- **On-Device 1D CNN Classifier**: SisFall dataset model running real-time TFLite inference every 500ms on 2-second windows.
+- **Deterministic Multi-Signal Gate (`IncidentDecisionEngine`)**: Filters out ordinary phone movements (shaking, picking up, walking) to prevent false alarms.
+- **Interactive Emergency Countdown**: 10-second "ARE YOU OKAY?" UI with instant `[ I'M GOOD ]` rider cancellation.
+- **Multi-Sensor Verification**: Automated post-countdown probing for rider movement (Camera), voice presence (Microphone), and location coordinates (GPS).
+- **On-Device Local LLM Reasoning**: Native `llama.cpp` JNI execution of `Qwen2.5-0.5B-Instruct` GGUF in under 3 seconds with **zero cloud APIs or internet dependency**.
+- **Deterministic Safety Enforcement (`SafetyValidator`)**: Hard rules validate LLM recommendations before triggering emergency alerts.
+- **Emergency SOS Alert**: Automated SMS dispatch with Google Maps location links and local integrity logging.
+- **Incident History & Timelines**: Full timeline visualization of recorded safety events and Qwen AI reports.
 
 ---
 
-## Operating Modes
+## 📁 Repository Architecture
 
-| Mode | SMS | Sensors | Use When |
-|------|-----|---------|----------|
-| **DEMO** | In-memory recorder | Real or mocked | Testing, hackathon demo setup |
-| **REAL** | Live `SmsManager` | Real hardware | Production demo, actual deployment |
-
-Debug builds default to **DEMO** mode. Release builds default to **REAL** mode.
-The mode switch in MainActivity persists for the session.
-
----
-
-## System Readiness Screen
-
-On launch, the app checks 6 P0 components:
-
-| Component | What's checked |
-|-----------|---------------|
-| Accelerometer | Hardware sensor present |
-| Gyroscope | Hardware sensor present |
-| Location Permission | `ACCESS_FINE_LOCATION` granted |
-| SMS Permission | `SEND_SMS` granted |
-| Cellular Service | SIM state `READY` |
-| Incident Log | Directory writable, file readable |
-
-Each shows **✓ OK** or **⚠ Warning + [FIX] button**.
-
----
-
-## Project Structure
-
-```
-app/
-├── src/
-│   ├── main/
-│   │   ├── java/com/rakshak/
-│   │   │   ├── RakshakApplication.kt       ← App entry point + exception handler
-│   │   │   ├── core/
-│   │   │   │   ├── mode/
-│   │   │   │   │   └── ModeManager.kt      ← Global DEMO/REAL switch (AtomicReference)
-│   │   │   │   ├── readiness/
-│   │   │   │   │   ├── ReadinessChecker.kt ← 6-point P0 readiness evaluation
-│   │   │   │   │   └── ReadinessStatus.kt  ← Data models
-│   │   │   │   └── log/
-│   │   │   │       └── IncidentLogIntegrityChecker.kt
-│   │   │   └── ui/main/
-│   │   │       ├── MainActivity.kt         ← Pure observer, zero business logic
-│   │   │       └── MainViewModel.kt        ← State holder, auto-refresh every 5s
-│   │   ├── res/
-│   │   └── AndroidManifest.xml
-│   └── test/
-│       └── java/com/rakshak/
-│           ├── RakshakSmokeTest.kt         ← Canary test (always passes)
-│           ├── core/mode/ModeManagerTest.kt
-│           └── core/readiness/ReadinessStatusTest.kt
+```text
+app/src/main/java/com/rakshak/
+├── RakshakApplication.kt
+├── core/
+│   ├── ai/                      # Local LLM reasoning & safety validator
+│   │   ├── LocalLlmReportGenerator.kt
+│   │   ├── PromptBuilder.kt
+│   │   ├── SafetyValidator.kt
+│   │   └── llm/LlamaAndroidEngine.kt
+│   ├── classifier/              # SisFall TFLite classifier & preprocessor
+│   │   ├── SensorPreprocessor.kt
+│   │   └── TFLiteCrashClassifier.kt
+│   ├── detector/                # Real-time state machine & decision gate
+│   │   ├── CrashDetector.kt
+│   │   └── IncidentDecisionEngine.kt
+│   ├── incident/                # Structured incident data & repository
+│   │   ├── IncidentData.kt
+│   │   └── IncidentRepository.kt
+│   └── sensor/                  # 50Hz foreground sensor service & buffers
+│       ├── SensorRingBuffer.kt
+│       └── SensorService.kt
+└── ui/
+    ├── main/MainActivity.kt     # Main 4-tab protection dashboard
+    ├── emergency/EmergencyCountdownActivity.kt  # Emergency countdown & verification
+    └── incident/IncidentDetailActivity.kt        # Timeline & Qwen breakdown
 ```
 
 ---
 
-## Building
+## 🚀 Model Setup Instructions
 
-### Prerequisites
-- Android Studio Iguana or later (or Android SDK CLI tools)
-- JDK 17+
-- Android SDK API 35
+The local reasoning engine requires the `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` model file (468 MB).
 
-### Quick start
+To place the GGUF model file into assets:
+
+1. Download `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` from HuggingFace:
+   [https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF)
+2. Place the downloaded `.gguf` file in:
+   `app/src/main/assets/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf`
+
+---
+
+## 🛠️ Build & Installation
+
+### Build Debug APK:
 ```bash
-git clone https://github.com/CodeWithRJ006/rakshak.git
-cd rakshak
 ./gradlew assembleDebug
-./gradlew test
 ```
 
-### Run tests
+### Install via ADB to Connected Device:
 ```bash
-./gradlew :app:testDebugUnitTest --info
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ---
 
-## Non-Negotiable Engineering Rules
-
-1. Never modify working P0 for P1/P2 convenience
-2. SMS latency > all other operations
-3. Every background op has a timeout + failure path
-4. No new dependency without justification
-5. P0_STABLE gate: only additive changes after gate
-6. VoiceTrigger is independent — never a dependency of crash detection
-7. SMS send ≠ SMS delivered (always distinguished in tests)
-8. Every feature: implementation + test + device validation + rollback
-
----
-
-## License
-
-MIT License — Hackathon submission for RAKSHAK crash-detection system.
+## 📄 License
+Copyright © 2026 RAKSHAK Team.
