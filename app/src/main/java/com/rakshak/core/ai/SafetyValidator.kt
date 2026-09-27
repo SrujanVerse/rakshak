@@ -9,7 +9,7 @@ import com.rakshak.core.verification.IncidentVerificationData
  * ABSOLUTE SAFETY RULES:
  *  1. NORMAL, NO_INCIDENT, MINOR_EVENT, MINOR_MOVEMENT, UNUSUAL_MOVEMENT, or INCONCLUSIVE classifications CAN NEVER SEND SOS.
  *  2. LOW severity CAN NEVER SEND SOS.
- *  3. Absence of rider response alone with inconclusive camera/voice evidence MUST NOT trigger SOS.
+ *  3. Inconclusive or missing camera/audio evidence MUST NOT trigger SOS.
  *  4. Rider tapping I'M OKAY immediately cancels emergency workflow.
  *  5. DISPATCH_SMS is ONLY authorized when ALL genuine crash criteria are satisfied:
  *     - Detector state is CONFIRMED / CONFIRMED_INCIDENT
@@ -119,7 +119,8 @@ object SafetyValidator {
         val meetsEmergencyCriteria = data.accelerationEvidence >= 35.0f &&
                 data.rotationEvidence >= 5.0f &&
                 data.tfliteEvidence >= 0.85f &&
-                data.postEventMovement != "normal"
+                data.postEventMovement != "normal" &&
+                data.frontCameraAssessment == "PERSON_DETECTED"
 
         if (meetsEmergencyCriteria && safeReasoning.classification == EventClassification.SERIOUS_INCIDENT) {
             val finalSeverity = if (safeReasoning.severity == IncidentSeverity.CRITICAL) IncidentSeverity.CRITICAL else IncidentSeverity.HIGH
@@ -134,6 +135,7 @@ object SafetyValidator {
         var validatedSeverity = safeReasoning.severity
         val classification = safeReasoning.classification
 
+        // Rule 1: Non-incident & Inconclusive Classification Guard
         val isNonIncidentClass = classification == EventClassification.NORMAL ||
                 classification == EventClassification.NO_INCIDENT ||
                 classification == EventClassification.MINOR_EVENT ||
@@ -147,6 +149,21 @@ object SafetyValidator {
             }
             if (validatedAction == RecommendedAction.DISPATCH_SMS || validatedAction == RecommendedAction.SEND_SOS) {
                 validatedAction = if (validatedSeverity == IncidentSeverity.LOW) RecommendedAction.LOG_ONLY else RecommendedAction.PROMPT_USER
+            }
+        }
+
+        // Rule 2: Inconclusive or Missing Camera/Audio Evidence Strictly Blocks SOS
+        val isVisualOrAudioInconclusive = data.frontCameraAssessment == "NO_CLEAR_VISUAL_EVIDENCE" ||
+                data.frontCameraAssessment == "CAMERA_UNAVAILABLE" ||
+                data.rearCameraAssessment == "CAMERA_UNAVAILABLE" ||
+                data.voiceAssessment == "AUDIO_UNAVAILABLE"
+
+        if (isVisualOrAudioInconclusive) {
+            if (validatedAction == RecommendedAction.DISPATCH_SMS || validatedAction == RecommendedAction.SEND_SOS) {
+                validatedAction = RecommendedAction.LOG_ONLY
+            }
+            if (validatedSeverity == IncidentSeverity.HIGH || validatedSeverity == IncidentSeverity.CRITICAL) {
+                validatedSeverity = IncidentSeverity.MODERATE
             }
         }
 

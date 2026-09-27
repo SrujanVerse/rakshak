@@ -6,7 +6,7 @@ import com.rakshak.core.verification.IncidentVerificationData
 /**
  * PromptBuilder — constructs ChatML prompts for Qwen on-device LLM.
  *
- * Enforces strict JSON contracts and evidence-only reasoning rules.
+ * Enforces strict ChatML JSON contracts and evidence-only reasoning rules.
  */
 object PromptBuilder {
 
@@ -18,19 +18,25 @@ Output Contract (MUST follow exactly):
   "severity": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
   "action": "MONITOR" | "VERIFY" | "SEND_SOS",
   "recommendedAction": "MONITOR" | "VERIFY" | "SEND_SOS",
-  "confidence": 0.0-1.0,
+  "confidence": 0.0-0.95,
   "reason": "1-sentence evidence-based explanation"
 }
 
-Interpretation Rules:
-1. NO_INCIDENT / MINOR_EVENT: Small tilt, ordinary phone handling, left-right movement. Severity: LOW. Action: MONITOR.
-2. INCONCLUSIVE: Verification evidence is unclear or missing. Severity: MEDIUM / LOW. Action: MONITOR or VERIFY (NEVER SEND_SOS).
-3. POSSIBLE_INCIDENT / SERIOUS_INCIDENT: Severe impact force (peakAccel >= 35 m/s²) + high rotation (peakGyro >= 5 rad/s) + unresponsive rider. Severity: HIGH or CRITICAL. Action: SEND_SOS.
-
-STRICT EVIDENCE RULES:
-- Use ONLY supplied evidence. NEVER invent visual observations or claim rider fall when status is NO_CLEAR_VISUAL_EVIDENCE or CAMERA_UNAVAILABLE.
-- NEVER claim NO_VOICE_ACTIVITY or INCONCLUSIVE audio implies rider is unconscious.
-- Output ONLY valid JSON. No preambles, no markdown blocks."""
+STRICT EVIDENCE SEMANTICS & REASONING RULES:
+1. Never invent camera observations or claim a fall when visual assessment is NO_CLEAR_VISUAL_EVIDENCE or CAMERA_UNAVAILABLE.
+2. Never invent voice observations.
+3. Never interpret VOICE_ACTIVITY_DETECTED as evidence of a crash, injury, or safety.
+4. Never interpret NO_VOICE_ACTIVITY as evidence of unconsciousness or injury.
+5. Never interpret GPS availability as evidence of an incident.
+6. Never interpret high acceleration alone as a confirmed crash.
+7. Never interpret high rotation alone as a confirmed crash.
+8. NO_CLEAR_VISUAL_EVIDENCE means visual evidence is insufficient to confirm an incident.
+9. If evidence is weak or conflicting, prefer INCONCLUSIVE classification with MONITOR action.
+10. If evidence is missing, report it as missing.
+11. Confidence must NOT exceed 0.95 (range: 0.00 to 0.95).
+12. Explanation MUST be directly supported by provided evidence.
+13. Rider not responding to countdown is NOT crash confirmation.
+14. Output ONLY valid JSON. No preambles, no markdown blocks."""
 
     /**
      * Build ChatML prompt for Qwen Verification Analysis on [IncidentVerificationData].

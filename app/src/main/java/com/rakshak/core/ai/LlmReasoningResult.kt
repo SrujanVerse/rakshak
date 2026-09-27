@@ -134,7 +134,8 @@ data class LlmReasoningResult(
                 val explanation = reasonVal ?: "Multi-sensor evidence analyzed."
                 val report = extractJsonValue(cleaned, "report") ?: explanation
                 val confidenceStr = extractJsonValue(cleaned, "confidence")
-                val confidence = confidenceStr?.toFloatOrNull() ?: 0.5f
+                val rawConfidence = confidenceStr?.toFloatOrNull() ?: 0.5f
+                val confidence = rawConfidence.coerceIn(0.0f, 0.95f)
 
                 LlmReasoningResult(
                     severity = severity,

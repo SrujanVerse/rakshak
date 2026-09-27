@@ -62,6 +62,8 @@ class EmergencyCountdownActivity : AppCompatActivity() {
     private lateinit var cameraContainer: LinearLayout
     private lateinit var frontTextureView: TextureView
     private lateinit var rearTextureView: TextureView
+    private lateinit var tvFrontStatus: TextView
+    private lateinit var tvRearStatus: TextView
 
     private lateinit var reportGenerator: IncidentReportGenerator
     private lateinit var cameraEngine: CameraVerificationEngine
@@ -70,6 +72,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
     private var countDownTimer: CountDownTimer? = null
     private var verificationJob: Job? = null
     private var isCancelled = false
+    private val incidentId = "RKS-${System.currentTimeMillis() % 100000}"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,7 +83,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
 
         setContentView(buildLayout())
 
-        Log.i(TAG, "[RAKSHAK_SAFETY_CHECK_STARTED] Rider safety confirmation initiated")
+        Log.i(TAG, "[$incidentId] [01] MOTION_CANDIDATE Safety check initiated")
         
         triggerBuzz()
         startCountdown()
@@ -122,7 +125,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
     }
 
     private fun startCountdown() {
-        Log.i(TAG, "[RAKSHAK_COUNTDOWN_STARTED] 10-second countdown active")
+        Log.i(TAG, "[$incidentId] [02] COUNTDOWN_STARTED 10-second countdown active")
         val durationMs = if (intent.getBooleanExtra("auto_expire", false)) 500L else 10000L
         countDownTimer = object : CountDownTimer(durationMs, 500) {
             override fun onTick(millisUntilFinished: Long) {
@@ -146,7 +149,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
 
         cameraEngine.closeCameras()
 
-        Log.i(TAG, "[RAKSHAK_USER_CONFIRMED_SAFE] User pressed I'M OKAY. Cancelling emergency workflow.")
+        Log.i(TAG, "[$incidentId] [03] RIDER_RESPONSE Rider pressed I'M OKAY. Cancelling emergency workflow.")
         com.rakshak.core.detector.IncidentDecisionEngine.resetToNormal()
 
         val now = System.currentTimeMillis()
@@ -154,7 +157,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         com.rakshak.core.incident.IncidentRepository.addRecord(
             applicationContext,
             com.rakshak.core.incident.IncidentRecord(
-                id = "inc_$now",
+                id = incidentId,
                 timestampMs = now,
                 title = "Movement Anomaly — Resolved",
                 status = "RESOLVED BY RIDER",
@@ -189,8 +192,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
     }
 
     private fun onCountdownExpired() {
-        Log.i(TAG, "[RAKSHAK_COUNTDOWN_EXPIRED] 10-second timer reached 0 without response")
-        Log.i(TAG, "[STATE_CHANGE] Transitioning to VERIFYING_INCIDENT phase")
+        Log.i(TAG, "[$incidentId] [04] VERIFICATION_STARTED 10-second timer reached 0 without response")
 
         tvStatus.text = "🔍 CHECKING YOUR SITUATION..."
         tvStatus.setTextColor(0xFFFF9800.toInt())
@@ -199,6 +201,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         tvTimer.setTextColor(0xFFFFC107.toInt())
 
         cameraContainer.visibility = View.VISIBLE
+        cameraContainer.alpha = 1.0f
 
         verificationJob = lifecycleScope.launch {
             runVerificationAndReasoningFlow()
@@ -206,23 +209,30 @@ class EmergencyCountdownActivity : AppCompatActivity() {
     }
 
     private suspend fun runVerificationAndReasoningFlow() {
+        // Allow Android UI layout pass to complete for TextureViews
+        kotlinx.coroutines.delay(200L)
+
         // 1. Live Camera Verification
-        Log.i(TAG, "[RAKSHAK_CAMERA_START] Starting Camera2 verification engine")
-        val cameraResult = cameraEngine.runCameraVerification(frontTextureView, rearTextureView)
-        Log.i(TAG, "[RAKSHAK_CAMERA_COMPLETE] Front: ${cameraResult.frontAssessment}, Rear: ${cameraResult.rearAssessment}")
+        Log.i(TAG, "[$incidentId] [05] FRONT_CAMERA & [06] REAR_CAMERA Starting Camera2 verification engine")
+        val cameraResult = cameraEngine.runCameraVerification(incidentId, frontTextureView, rearTextureView)
+        
+        withContext(Dispatchers.Main) {
+            tvFrontStatus.text = "Front: ● ${cameraResult.frontStatus}"
+            tvRearStatus.text = "Rear: ● ${cameraResult.rearStatus}"
+        }
 
         // 2. Microphone Voice Check
-        Log.i(TAG, "[RAKSHAK_MIC_START] Starting AudioRecord VAD check")
+        Log.i(TAG, "[$incidentId] [07] AUDIO Starting AudioRecord VAD check")
         val voiceResult = voiceEngine.runVoiceVerification(durationMs = 1500L)
-        Log.i(TAG, "[RAKSHAK_MIC_COMPLETE] Voice assessment: ${voiceResult.assessment}")
+        Log.i(TAG, "[$incidentId] [07] AUDIO Voice assessment: ${voiceResult.assessment}")
 
         // 3. GPS Location Check
-        Log.i(TAG, "[RAKSHAK_GPS_START] Fetching current GPS location")
+        Log.i(TAG, "[$incidentId] [08] GPS Fetching current GPS location")
         val location = getGpsLocation()
         val lat = location?.latitude ?: 17.4224521
         val lng = location?.longitude ?: 78.3369978
         val locationAvailable = location != null
-        Log.i(TAG, "[RAKSHAK_GPS_COMPLETE] GPS location: lat=$lat, lng=$lng, available=$locationAvailable")
+        Log.i(TAG, "[$incidentId] [08] GPS Location: lat=$lat, lng=$lng, available=$locationAvailable")
 
         // Build IncidentVerificationData structured evidence payload
         val episodeData = com.rakshak.core.detector.IncidentDecisionEngine.getEpisodeData()
@@ -231,7 +241,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
             tfliteEvidence = episodeData.peakCrashProb,
             accelerationEvidence = episodeData.peakAccel,
             rotationEvidence = episodeData.peakGyro,
-            postEventMovement = if (cameraResult.frontAssessment == "PERSON_DETECTED") "limited" else "normal",
+            postEventMovement = "normal",
             frontCameraStatus = cameraResult.frontStatus,
             frontCameraAssessment = cameraResult.frontAssessment,
             rearCameraStatus = cameraResult.rearStatus,
@@ -245,20 +255,21 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         )
 
         withContext(Dispatchers.Main) {
+            tvStatus.text = "🧠 AI ASSESSMENT IN PROGRESS..."
             tvDetails.text = buildString {
-                append("RAKSHAK LIVE EVIDENCE ASSESSMENT\n\n")
-                append("• Front Camera:  ${cameraResult.frontAssessment}\n")
-                append("• Rear Camera:   ${cameraResult.rearAssessment}\n")
-                append("• Voice Check:   ${voiceResult.assessment}\n")
-                append("• Location:      ${if (locationAvailable) "$lat, $lng" else "Unavailable"}\n")
-                append("• Peak Force:    ${String.format("%.1f", episodeData.peakAccel)} m/s²\n")
-                append("• Rotation Rate: ${String.format("%.1f", episodeData.peakGyro)} rad/s\n\n")
-                append("🧠 Local Qwen 2.5 AI evaluating evidence...")
+                append("RAW EVIDENCE\n")
+                append("• Acceleration: ${String.format("%.1f", episodeData.peakAccel)} m/s²\n")
+                append("• Rotation:     ${String.format("%.1f", episodeData.peakGyro)} rad/s\n")
+                append("• Front Camera: ${cameraResult.frontAssessment}\n")
+                append("• Rear Camera:  ${cameraResult.rearAssessment}\n")
+                append("• Voice Check:  ${voiceResult.assessment}\n")
+                append("• GPS Status:   ${if (locationAvailable) "AVAILABLE ($lat, $lng)" else "UNAVAILABLE"}\n\n")
+                append("🧠 Qwen 2.5 is analyzing the available evidence...")
             }
         }
 
         // 4. Local Qwen 2.5 LLM Analysis
-        Log.i(TAG, "[RAKSHAK_LLM_START] Triggering Qwen2.5-0.5B-Instruct verification analysis")
+        Log.i(TAG, "[$incidentId] [09] QWEN_INPUT Triggering Qwen2.5-0.5B-Instruct verification analysis")
         val incident = IncidentData(
             eventType = "possible_crash",
             confidence = episodeData.peakCrashProb,
@@ -275,12 +286,12 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         )
 
         val reportResult = reportGenerator.generateReport(incident, timeoutMs = 15000)
-        Log.i(TAG, "[RAKSHAK_LLM_COMPLETE] On-device LLM reasoning completed in ${reportResult.latencyMs}ms")
+        Log.i(TAG, "[$incidentId] [10] QWEN_OUTPUT On-device LLM reasoning completed in ${reportResult.latencyMs}ms")
 
         val reasoning = reportResult.reasoningResult
         val finalReasoning = SafetyValidator.validateVerification(verificationData, reasoning)
 
-        Log.i(TAG, "[RAKSHAK_SAFETY_VALIDATED] Validated Action: ${finalReasoning.recommendedAction}, Severity: ${finalReasoning.severity}")
+        Log.i(TAG, "[$incidentId] [11] SAFETY_VALIDATION Validated Action: ${finalReasoning.recommendedAction}, Severity: ${finalReasoning.severity}")
 
         val now = System.currentTimeMillis()
         val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
@@ -289,14 +300,16 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         // 5. EXPLICIT SAFETY GATE BEFORE SMS DISPATCH
         val isSmsAuthorized = finalReasoning.recommendedAction == RecommendedAction.DISPATCH_SMS
 
+        Log.i(TAG, "[$incidentId] [12] FINAL_ACTION Authorized: $isSmsAuthorized, Action: ${finalReasoning.recommendedAction}")
+
         val smsStatus = if (isSmsAuthorized) {
-            Log.i(TAG, "[RAKSHAK_SOS_START] Dispatching emergency SOS alert")
+            Log.i(TAG, "[$incidentId] [13] SMS_RESULT Dispatching emergency SOS alert")
             val sosMessage = "RAKSHAK ALERT: Confirmed two-wheeler incident detected. Location: $locUrl Time: ${sdf.format(java.util.Date(now))}."
             val status = sendSosSms("9999999999", sosMessage)
-            Log.i(TAG, "[RAKSHAK_SOS_COMPLETE] SOS SMS status: $status")
+            Log.i(TAG, "[$incidentId] [13] SMS_RESULT Status: $status")
             status
         } else {
-            Log.i(TAG, "[RAKSHAK_SOS_BLOCKED] SafetyValidator prevented SMS dispatch. Action=${finalReasoning.recommendedAction}")
+            Log.i(TAG, "[$incidentId] [13] SMS_RESULT SafetyValidator prevented SMS dispatch. Action=${finalReasoning.recommendedAction}")
             "NO_SMS_REQUIRED"
         }
 
@@ -304,7 +317,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         com.rakshak.core.incident.IncidentRepository.addRecord(
             applicationContext,
             com.rakshak.core.incident.IncidentRecord(
-                id = "inc_$now",
+                id = incidentId,
                 timestampMs = now,
                 title = if (isSmsAuthorized) "Confirmed Serious Incident" else "No Incident Confirmed",
                 status = if (isSmsAuthorized) "SOS SENT" else "LOGGED ONLY",
@@ -325,33 +338,54 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         )
 
         withContext(Dispatchers.Main) {
-            if (isSmsAuthorized) {
-                tvStatus.text = "🚨 EMERGENCY SOS DISPATCHED"
+            val normalizedConfPercent = (finalReasoning.confidence.coerceIn(0.0f, 0.95f) * 100).toInt()
+
+            if (isSmsAuthorized && smsStatus.startsWith("SMS_SENT")) {
+                tvStatus.text = "🚨 EMERGENCY CONTACT NOTIFIED"
                 tvStatus.setTextColor(0xFFFF5252.toInt())
 
                 tvDetails.text = buildString {
-                    append("ON-DEVICE AI ASSESSMENT\n")
-                    append("Qwen 2.5 • Running locally on phone\n\n")
-                    append("CLASSIFICATION:\n${finalReasoning.classification}\n\n")
-                    append("SEVERITY:\n${finalReasoning.severity}\n\n")
-                    append("CONFIDENCE:\n${String.format("%.0f%%", finalReasoning.confidence * 100)}\n\n")
-                    append("EXPLANATION:\n${finalReasoning.explanation}\n\n")
-                    append("RESPONSE ACTION:\nEmergency contact notification initiated\n\n")
-                    append("LOCATION LINK:\n$locUrl\n")
+                    append("RAW EVIDENCE\n")
+                    append("• Acceleration: ${String.format("%.1f", episodeData.peakAccel)} m/s²\n")
+                    append("• Rotation:     ${String.format("%.1f", episodeData.peakGyro)} rad/s\n")
+                    append("• Front Camera: ${cameraResult.frontAssessment}\n")
+                    append("• Rear Camera:  ${cameraResult.rearAssessment}\n")
+                    append("• Voice Check:  ${voiceResult.assessment}\n")
+                    append("• GPS Status:   ${if (locationAvailable) "AVAILABLE" else "UNAVAILABLE"}\n\n")
+                    append("LOCAL AI ASSESSMENT\n")
+                    append("Qwen 2.5 • Running locally on phone\n")
+                    append("Classification: ${finalReasoning.classification}\n")
+                    append("Severity:       ${finalReasoning.severity}\n")
+                    append("Confidence:     $normalizedConfPercent%\n")
+                    append("Why:            ${finalReasoning.explanation}\n\n")
+                    append("SAFETY VALIDATION\n")
+                    append("✓ SafetyValidator authorized emergency dispatch.\n\n")
+                    append("FINAL ACTION\n")
+                    append("Emergency contact notification initiated\n")
+                    append("Location: $locUrl\n")
                 }
             } else {
                 tvStatus.text = "🟢 NO INCIDENT CONFIRMED"
                 tvStatus.setTextColor(0xFF81C784.toInt())
 
                 tvDetails.text = buildString {
-                    append("ON-DEVICE AI ASSESSMENT\n")
-                    append("Qwen 2.5 • Running locally on phone\n\n")
-                    append("CLASSIFICATION:\n${finalReasoning.classification}\n\n")
-                    append("SEVERITY:\n${finalReasoning.severity}\n\n")
-                    append("CONFIDENCE:\n${String.format("%.0f%%", finalReasoning.confidence * 100)}\n\n")
-                    append("EXPLANATION:\n${finalReasoning.explanation}\n\n")
-                    append("RESPONSE ACTION:\nMonitoring / No emergency action\n\n")
-                    append("✓ SafetyValidator verified evidence did not justify emergency dispatch.\n")
+                    append("RAW EVIDENCE\n")
+                    append("• Acceleration: ${String.format("%.1f", episodeData.peakAccel)} m/s²\n")
+                    append("• Rotation:     ${String.format("%.1f", episodeData.peakGyro)} rad/s\n")
+                    append("• Front Camera: ${cameraResult.frontAssessment}\n")
+                    append("• Rear Camera:  ${cameraResult.rearAssessment}\n")
+                    append("• Voice Check:  ${voiceResult.assessment}\n")
+                    append("• GPS Status:   ${if (locationAvailable) "AVAILABLE" else "UNAVAILABLE"}\n\n")
+                    append("LOCAL AI ASSESSMENT\n")
+                    append("Qwen 2.5 • Running locally on phone\n")
+                    append("Classification: ${finalReasoning.classification}\n")
+                    append("Severity:       ${finalReasoning.severity}\n")
+                    append("Confidence:     $normalizedConfPercent%\n")
+                    append("Why:            ${finalReasoning.explanation}\n\n")
+                    append("SAFETY VALIDATION\n")
+                    append("✓ SafetyValidator verified evidence did not justify emergency dispatch.\n\n")
+                    append("FINAL ACTION\n")
+                    append("Monitoring / No emergency action\n")
                 }
             }
 
@@ -452,24 +486,26 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         // Dual Camera Container
         cameraContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            visibility = View.GONE
+            visibility = View.VISIBLE
+            alpha = 0f
             setPadding(0, 0, 0, dp(16))
         }
 
         val frontCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(4), dp(4), dp(4))
-            val params = LinearLayout.LayoutParams(0, dp(120), 1f)
+            val params = LinearLayout.LayoutParams(0, dp(130), 1f)
             params.marginEnd = dp(4)
             layoutParams = params
             setBackgroundColor(0xFF1F2430.toInt())
         }
-        frontCard.addView(TextView(this).apply {
-            text = "📷 FRONT CAMERA"
+        tvFrontStatus = TextView(this).apply {
+            text = "Front: ● INITIALIZING"
             setTextColor(0xFFB0B8C8.toInt())
             textSize = 10f
             gravity = Gravity.CENTER
-        })
+        }
+        frontCard.addView(tvFrontStatus)
         frontTextureView = TextureView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -482,17 +518,18 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         val rearCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(4), dp(4), dp(4))
-            val params = LinearLayout.LayoutParams(0, dp(120), 1f)
+            val params = LinearLayout.LayoutParams(0, dp(130), 1f)
             params.marginStart = dp(4)
             layoutParams = params
             setBackgroundColor(0xFF1F2430.toInt())
         }
-        rearCard.addView(TextView(this).apply {
-            text = "📷 REAR CAMERA"
+        tvRearStatus = TextView(this).apply {
+            text = "Rear: ● INITIALIZING"
             setTextColor(0xFFB0B8C8.toInt())
             textSize = 10f
             gravity = Gravity.CENTER
-        })
+        }
+        rearCard.addView(tvRearStatus)
         rearTextureView = TextureView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
