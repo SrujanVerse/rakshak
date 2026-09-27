@@ -92,9 +92,9 @@ data class LlmReasoningResult(
                 }
 
                 val explanation = extractJsonValue(cleaned, "explanation")
-                    ?: "Reasoning generated based on multi-sensor evidence."
+                    ?: "Multi-sensor analysis evaluated motion acceleration and gyroscope rotation."
                 val report = extractJsonValue(cleaned, "report")
-                    ?: "Incident reported based on available data."
+                    ?: "On-device AI safety assessment completed."
 
                 LlmReasoningResult(
                     severity = severity,

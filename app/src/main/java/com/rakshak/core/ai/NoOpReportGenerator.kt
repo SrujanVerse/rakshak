@@ -36,10 +36,14 @@ class NoOpReportGenerator : IncidentReportGenerator {
         fun buildDeterministicReasoning(incident: IncidentData, reportText: String? = null): LlmReasoningResult {
             val report = reportText ?: buildTemplateReport(incident)
 
+            val isGenuineSevereCrash = incident.peakAcceleration >= 35.0f &&
+                    incident.peakGyroscope >= 5.0f &&
+                    incident.confidence >= 0.85f
+
             val severity = when {
-                incident.confidence >= 0.9f || incident.peakAcceleration >= 30.0f -> IncidentSeverity.CRITICAL
-                incident.confidence >= 0.7f -> IncidentSeverity.HIGH
-                incident.confidence >= 0.5f -> IncidentSeverity.MODERATE
+                isGenuineSevereCrash && incident.confidence >= 0.90f -> IncidentSeverity.CRITICAL
+                isGenuineSevereCrash -> IncidentSeverity.HIGH
+                incident.peakAcceleration >= 24.0f && incident.confidence >= 0.70f -> IncidentSeverity.MODERATE
                 else -> IncidentSeverity.LOW
             }
 

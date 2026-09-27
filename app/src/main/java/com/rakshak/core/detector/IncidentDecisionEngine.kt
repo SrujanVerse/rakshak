@@ -220,9 +220,9 @@ object IncidentDecisionEngine {
         if (currentState == IncidentDecisionState.POSSIBLE_INCIDENT) {
             val fsmConfirmed = fsmState == DetectorState.CONFIRMED
 
-            // Path A: CrashDetector FSM independently confirmed (impact + jerk + 2s resting)
-            // This is the strongest signal — the deterministic FSM has its own multi-stage validation
-            val pathA = fsmConfirmed && episodePeakCrashProb >= 0.80f
+            // Path A: CrashDetector FSM independently confirmed WITH strong angular rotation AND high ML confidence
+            // A hand shake lacks high rotational velocity (>=5.0 rad/s) and sustained vehicle impact signature
+            val pathA = fsmConfirmed && episodePeakCrashProb >= 0.85f && episodePeakGyro >= 5.0f
 
             // Path B: All signals independently strong + temporal persistence
             val pathB = episodePeakAccel >= CONFIRMED_ACCEL &&

@@ -3,19 +3,17 @@ package com.rakshak.core.ai
 import com.rakshak.core.incident.IncidentData
 
 /**
- * SafetyValidator — enforces deterministic safety constraints over LLM advisory recommendations.
+ * SafetyValidator — authoritative deterministic safety boundary over LLM advisory output.
  *
- * Architecture Rule:
- *  - The Local LLM is an on-device reasoning engine, but its output is ADVISORY.
- *  - Hard deterministic rules enforce safety boundaries:
- *     1. If a crash is CONFIRMED with high confidence (>=0.85f), the LLM CANNOT downgrade the action
- *        to CANCEL_ALERT or LOG_ONLY without user interaction.
- *     2. Extreme acceleration spikes (>= 35 m/s²) with high confidence enforce minimum HIGH severity.
- *     3. Weak evidence (low accel, low confidence) MUST NOT be escalated beyond MODERATE.
- *
- * Key principle: SafetyValidator prevents BOTH false negatives AND false positives.
- *  - It blocks LLM from downgrading confirmed high-confidence crashes.
- *  - It blocks escalation when evidence is weak (prevents small movements → HIGH).
+ * ABSOLUTE SAFETY RULES:
+ *  1. LOW severity MUST NEVER send SOS. If severity == LOW, action MUST be LOG_ONLY or CANCEL_ALERT or PROMPT_USER.
+ *  2. DISPATCH_SMS is ONLY authorized when ALL 4 conditions are met:
+ *     - Detector state is CONFIRMED / CONFIRMED_INCIDENT
+ *     - Crash confidence >= 0.85f
+ *     - Peak acceleration >= 32.0 m/s²
+ *     - Peak gyroscope >= 4.0 rad/s
+ *  3. Weak evidence (accel < 30 m/s², gyro < 3.5 rad/s, or confidence < 0.80) MUST NOT exceed MODERATE severity.
+ *  4. Qwen is ADVISORY. SafetyValidator is AUTHORITATIVE.
  */
 object SafetyValidator {
 
@@ -23,35 +21,41 @@ object SafetyValidator {
         var validatedAction = llmReasoning.recommendedAction
         var validatedSeverity = llmReasoning.severity
 
-        // ── Rule 1: Prevent downgrading CONFIRMED high-confidence crashes ──
-        // If the deterministic FSM confirmed a crash with high confidence,
-        // the LLM cannot cancel or log-only.
-        if (incident.detectorState == "CONFIRMED" && incident.confidence >= 0.85f) {
-            if (validatedAction == RecommendedAction.LOG_ONLY || validatedAction == RecommendedAction.CANCEL_ALERT) {
-                validatedAction = RecommendedAction.DISPATCH_SMS
-                validatedSeverity = IncidentSeverity.HIGH
-            }
-        }
+        // ── RULE 1: Weak evidence cap — prevent false positive escalation ──
+        val isWeakEvidence = incident.peakAcceleration < 30.0f ||
+                incident.confidence < 0.80f ||
+                incident.peakGyroscope < 3.5f
 
-        // ── Rule 2: Extreme force with high confidence → minimum HIGH severity ──
-        // Raised threshold from 30 to 35 m/s² and requires high confidence to prevent
-        // strong phone shakes from being forced to HIGH.
-        if (incident.peakAcceleration >= 35.0f && incident.confidence >= 0.85f &&
-            (validatedSeverity == IncidentSeverity.LOW || validatedSeverity == IncidentSeverity.MODERATE)) {
-            validatedSeverity = IncidentSeverity.HIGH
-        }
-
-        // ── Rule 3: Weak evidence cap — prevent false positive escalation ──
-        // If peak acceleration is below impact level AND confidence is below 0.80,
-        // the severity MUST NOT exceed MODERATE regardless of what the LLM says.
-        // This prevents: small left-right movement → LLM says HIGH → SOS sent
-        if (incident.peakAcceleration < 30.0f && incident.confidence < 0.80f) {
+        if (isWeakEvidence) {
             if (validatedSeverity == IncidentSeverity.HIGH || validatedSeverity == IncidentSeverity.CRITICAL) {
                 validatedSeverity = IncidentSeverity.MODERATE
             }
             if (validatedAction == RecommendedAction.DISPATCH_SMS) {
                 validatedAction = RecommendedAction.PROMPT_USER
             }
+        }
+
+        // ── RULE 2: ABSOLUTE GUARD ON DISPATCH_SMS ──
+        // DISPATCH_SMS is ONLY permitted if ALL genuine crash criteria are satisfied
+        val meetsEmergencyCriteria = (incident.detectorState == "CONFIRMED" || incident.detectorState == "CONFIRMED_INCIDENT") &&
+                incident.confidence >= 0.85f &&
+                incident.peakAcceleration >= 32.0f &&
+                incident.peakGyroscope >= 4.0f
+
+        if (validatedAction == RecommendedAction.DISPATCH_SMS && !meetsEmergencyCriteria) {
+            // Downgrade action — evidence does not justify SMS alert
+            validatedAction = if (validatedSeverity == IncidentSeverity.LOW) RecommendedAction.LOG_ONLY else RecommendedAction.PROMPT_USER
+        }
+
+        // ── RULE 3: LOW SEVERITY CAN NEVER SEND SOS ──
+        if (validatedSeverity == IncidentSeverity.LOW && validatedAction == RecommendedAction.DISPATCH_SMS) {
+            validatedAction = RecommendedAction.LOG_ONLY
+        }
+
+        // ── RULE 4: Confirmed genuine severe crash enforces minimum HIGH severity ──
+        if (meetsEmergencyCriteria && (validatedSeverity == IncidentSeverity.LOW || validatedSeverity == IncidentSeverity.MODERATE)) {
+            validatedSeverity = IncidentSeverity.HIGH
+            validatedAction = RecommendedAction.DISPATCH_SMS
         }
 
         return llmReasoning.copy(

@@ -88,7 +88,7 @@ class LlmReasoningResultTest {
         val incident = IncidentData(
             eventType = "possible_crash",
             confidence = 0.94f,
-            peakAcceleration = 12.0f,
+            peakAcceleration = 36.0f,
             peakGyroscope = 10.0f,
             impactDurationMs = 200L,
             detectorState = "CONFIRMED",
@@ -113,7 +113,7 @@ class LlmReasoningResultTest {
             peakAcceleration = 36.0f, // Severe impact force + high confidence
             peakGyroscope = 10.0f,
             impactDurationMs = 200L,
-            detectorState = "MONITORING",
+            detectorState = "CONFIRMED",
         )
         val llmResult = LlmReasoningResult(
             severity = IncidentSeverity.LOW,
@@ -154,11 +154,12 @@ class LlmReasoningResultTest {
         val incident = IncidentData(
             eventType = "possible_crash",
             confidence = 0.94f,
-            peakAcceleration = 8.7f,
+            peakAcceleration = 36.0f,
             peakGyroscope = 14.5f,
             impactDurationMs = 180L,
             riderMovement = "limited",
             cameraVerification = "possible_fall",
+            detectorState = "CONFIRMED"
         )
         val result = generator.generateReport(incident)
         assertTrue(result.isSuccess)
