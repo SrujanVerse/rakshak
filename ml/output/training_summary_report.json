@@ -1,0 +1,124 @@
+{
+  "total_generated_windows": 38328,
+  "subjects": {
+    "train": [
+      "SA01",
+      "SA02",
+      "SA03",
+      "SA04",
+      "SA05",
+      "SA06",
+      "SA07",
+      "SA08",
+      "SA09",
+      "SA10",
+      "SA11",
+      "SA12",
+      "SA13",
+      "SA14",
+      "SA15",
+      "SA16",
+      "SE01",
+      "SE02",
+      "SE03",
+      "SE04",
+      "SE05",
+      "SE06",
+      "SE07",
+      "SE08",
+      "SE09",
+      "SE10"
+    ],
+    "val": [
+      "SA17",
+      "SA18",
+      "SA19",
+      "SE11",
+      "SE12",
+      "SE13"
+    ],
+    "test": [
+      "SA20",
+      "SA21",
+      "SA22",
+      "SA23",
+      "SE14",
+      "SE15"
+    ]
+  },
+  "window_counts": {
+    "train": 26688,
+    "val": 5523,
+    "test": 6117
+  },
+  "normalization": {
+    "channel_means": [
+      0.09173787385225296,
+      -6.925078868865967,
+      -0.962363600730896,
+      -0.007917243987321854,
+      0.037486013025045395,
+      -0.0053032161667943
+    ],
+    "channel_stds": [
+      3.9155020713806152,
+      5.749281406402588,
+      4.743640422821045,
+      0.7240691781044006,
+      0.6060656905174255,
+      0.5065562725067139
+    ],
+    "channels": [
+      "accelX",
+      "accelY",
+      "accelZ",
+      "gyroX",
+      "gyroY",
+      "gyroZ"
+    ],
+    "units": [
+      "m/s^2",
+      "m/s^2",
+      "m/s^2",
+      "rad/s",
+      "rad/s",
+      "rad/s"
+    ]
+  },
+  "metrics": {
+    "test_accuracy": 0.8757560895863986,
+    "test_precision": 0.8960573476702509,
+    "test_recall": 0.7190795781399808,
+    "test_f1_score": 0.7978723404255319,
+    "confusion_matrix": [
+      [
+        3857,
+        174
+      ],
+      [
+        586,
+        1500
+      ]
+    ]
+  },
+  "tflite": {
+    "input_shape": [
+      1,
+      100,
+      6
+    ],
+    "input_type": "<class 'numpy.float32'>",
+    "output_shape": [
+      1,
+      2
+    ],
+    "output_type": "<class 'numpy.float32'>",
+    "verification_passed": true,
+    "sample_output_probabilities": [
+      0.9947435855865479,
+      0.005256433039903641
+    ]
+  },
+  "tflite_location": "c:\\Users\\swathi\\Downloads\\rakshak-master\\rakshak-master\\app\\src\\main\\assets\\models\\crash_classifier.tflite",
+  "errors": []
+}

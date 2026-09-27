@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ================================================================== -->
+    <!-- P0 PERMISSIONS — Required for the safety-critical alert pipeline    -->
+    <!-- ================================================================== -->
+
+    <!-- SMS: Send emergency alert to emergency contact (P0 - HIGHEST priority) -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+    <!-- Location: Attach GPS coordinates to incident report (P0) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Phone state: Detect cellular service availability (P0 readiness check) -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- Sensors: Accelerometer + gyroscope are software sensors; no manifest entry needed -->
+
+    <!-- ================================================================== -->
+    <!-- P1 PERMISSIONS — Camera / Audio enrichment; failures don't block P0 -->
+    <!-- ================================================================== -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- P1: Save evidence clips to external storage -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- ================================================================== -->
+    <!-- HARDWARE FEATURES — declared as not required so non-sensor devices  -->
+    <!-- can still install (graceful degradation; sensors checked at runtime) -->
+    <!-- ================================================================== -->
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
+    <application
+        android:name=".RakshakApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Rakshak">
+        <service
+            android:name=".core.sensor.SensorService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="crash_detection" />
+        </service>
+
+        <!-- MainActivity: System Readiness screen + mode switch -->
+        <activity
+            android:name=".ui.main.MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- P2: AI Demo / Test screen — test report generation with fake incidents -->
+        <activity
+            android:name=".ui.demo.AiDemoActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:label="RAKSHAK AI Demo" />
+
+        <!-- Emergency Countdown Activity -->
+        <activity
+            android:name=".ui.emergency.EmergencyCountdownActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:label="RAKSHAK Safety Check" />
+
+        <!-- Incident Detail Report Activity -->
+        <activity
+            android:name=".ui.incident.IncidentDetailActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:label="Incident Report" />
+
+    </application>
+
+</manifest>

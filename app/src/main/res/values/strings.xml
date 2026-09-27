@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">RAKSHAK</string>
+    <string name="subtitle_system_readiness">System Readiness — Two-Wheeler Crash Detection</string>
+    <string name="label_operating_mode">Operating Mode</string>
+    <string name="mode_demo">DEMO</string>
+    <string name="mode_real">REAL</string>
+    <string name="btn_refresh">Refresh Status</string>
+    <string name="btn_fix">FIX</string>
+    <string name="status_all_systems_ready">✓ All systems ready</string>
+    <string name="status_action_required">⚠ Action required — see warnings below</string>
+    <string name="status_checking">Checking system readiness…</string>
+    <string name="permission_rationale_title">Permissions Required</string>
+    <string name="permission_rationale_message">RAKSHAK needs Location and SMS permissions to send emergency alerts. Without them, the app cannot protect you in a crash. Please grant all permissions in Settings.</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="btn_ai_demo">\uD83E\uDD16 AI Demo — Test Reports</string>
+</resources>

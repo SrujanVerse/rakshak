@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background -->
+    <color name="bg_primary">#0F1117</color>
+    <color name="surface">#1C1F2A</color>
+
+    <!-- Text -->
+    <color name="text_primary">#F0F0F0</color>
+    <color name="text_secondary">#9AA0B0</color>
+    <color name="text_on_chip">#FFFFFF</color>
+
+    <!-- Status -->
+    <color name="status_ok">#4CAF50</color>
+    <color name="status_warning">#FF9800</color>
+    <color name="status_checking">#9AA0B0</color>
+
+    <!-- Mode chips -->
+    <color name="mode_demo_bg">#1E3A5F</color>
+    <color name="mode_real_bg">#3E1A1A</color>
+
+    <!-- Material theme required colors -->
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

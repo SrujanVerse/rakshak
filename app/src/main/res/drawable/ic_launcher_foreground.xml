@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher foreground: Shield shape representing RAKSHAK protection -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Shield body -->
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M54,20 L80,30 L80,60 Q80,78 54,90 Q28,78 28,60 L28,30 Z" />
+
+    <!-- White 'R' lettermark -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,38 L44,70 L50,70 L50,57 L56,57 L62,70 L69,70 L62,56 Q66,54 66,48 Q66,38 56,38 Z M50,44 L56,44 Q60,44 60,48 Q60,52 56,52 L50,52 Z" />
+</vector>
