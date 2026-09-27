@@ -189,13 +189,14 @@ class EmergencyCountdownActivity : AppCompatActivity() {
         val locationAvailable = location != null || true
         Log.i(TAG, "[RAKSHAK_GPS_COMPLETE] GPS location: lat=$lat, lng=$lng, available=$locationAvailable")
 
-        // Construct IncidentData
+        // Construct IncidentData with REAL sensor values from the detection episode
+        val episodeData = com.rakshak.core.detector.IncidentDecisionEngine.getEpisodeData()
         val incident = IncidentData(
             eventType = "possible_crash",
-            confidence = 0.92f,
-            peakAcceleration = 28.5f,
-            peakGyroscope = 4.2f,
-            impactDurationMs = 4500L,
+            confidence = episodeData.peakCrashProb,
+            peakAcceleration = episodeData.peakAccel,
+            peakGyroscope = episodeData.peakGyro,
+            impactDurationMs = episodeData.durationMs,
             riderMovement = riderMovement,
             cameraVerification = cameraResult,
             audioVerification = audioResult,
@@ -203,7 +204,7 @@ class EmergencyCountdownActivity : AppCompatActivity() {
             latitude = lat,
             longitude = lng,
             timestampMs = System.currentTimeMillis(),
-            detectorState = "CONFIRMED"
+            detectorState = episodeData.fsmState
         )
 
         withContext(Dispatchers.Main) {

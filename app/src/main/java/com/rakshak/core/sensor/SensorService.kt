@@ -179,8 +179,17 @@ class SensorService : Service(), SensorEventListener {
             "Window created: accelSamples=${accelSamples.size}, gyroSamples=${gyroSamples.size}, inputShape=[1,100,6]"
         )
 
-        // Compute peak values from sensor window
-        val (peakAccel, peakGyro) = SensorPreprocessor.computePeakValues(accelSamples, gyroSamples)
+        // CRITICAL FIX: Compute peak values from RECENT samples only (~1 second window)
+        // instead of the entire 4-second ring buffer. This prevents stale acceleration
+        // spikes from persisting and causing false positives in the decision engine.
+        val recentWindowNanos = 1_000_000_000L // 1 second
+        val recentAccel = filterRecentSamples(accelSamples, recentWindowNanos)
+        val recentGyro = filterRecentSamples(gyroSamples, recentWindowNanos)
+
+        val (recentPeakAccel, recentPeakGyro) = SensorPreprocessor.computePeakValues(
+            if (recentAccel.size >= 2) recentAccel else accelSamples,
+            if (recentGyro.size >= 2) recentGyro else gyroSamples
+        )
 
         // Execute TFLite inference
         val crashProb = if (::classifier.isInitialized && classifier.isReady) {
@@ -190,20 +199,31 @@ class SensorService : Service(), SensorEventListener {
                 val prob = result.crashProbability
                 Log.i(
                     TAG,
-                    "TFLite inference executed: normalProbability=%.4f, crashProbability=%.4f, peakAccel=%.2f m/s², FSMState=${crashDetector.currentState}"
-                        .format(normalProb, prob, peakAccel)
+                    "TFLite inference: normalProb=%.4f, crashProb=%.4f, recentPeakAccel=%.2f m/s², recentPeakGyro=%.2f rad/s, FSM=${crashDetector.currentState}"
+                        .format(normalProb, prob, recentPeakAccel, recentPeakGyro)
                 )
                 prob
             } else 0.0f
         } else 0.0f
 
-        // Evaluate continuous incident decision engine with multi-signal gate
+        // Evaluate continuous incident decision engine with RECENT peak values
         com.rakshak.core.detector.IncidentDecisionEngine.evaluate(
             crashProbability = crashProb,
-            peakAccelMagnitude = peakAccel,
-            peakGyroMagnitude = peakGyro,
+            recentPeakAccel = recentPeakAccel,
+            recentPeakGyro = recentPeakGyro,
             fsmState = crashDetector.currentState
         )
+    }
+
+    /**
+     * Filter sensor samples to only include those within the most recent time window.
+     * This prevents stale spikes in the 4-second ring buffer from persisting as "peak" values.
+     */
+    private fun filterRecentSamples(samples: List<SensorData>, windowNanos: Long): List<SensorData> {
+        if (samples.isEmpty()) return samples
+        val latestTimestamp = samples.maxOf { it.timestamp }
+        val cutoff = latestTimestamp - windowNanos
+        return samples.filter { it.timestamp >= cutoff }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {

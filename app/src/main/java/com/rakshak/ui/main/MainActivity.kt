@@ -421,20 +421,38 @@ class MainActivity : AppCompatActivity() {
 
         container.addView(aiModelCard)
 
-        // Capabilities
-        container.addView(sectionHeader("AI CAPABILITIES OVERVIEW"))
+        // 6-Stage Intelligence
+        container.addView(sectionHeader("6-STAGE INTELLIGENT DETECTION"))
 
-        val capCard = LinearLayout(this).apply {
+        val stageCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF161922.toInt())
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
 
-        capCard.addView(createCapItem("📊 Multi-Signal Anomaly Analysis", "Interprets peak acceleration, rotation, and impact duration."))
-        capCard.addView(createCapItem("📷 Evidence Verification Integration", "Combines rider movement and microphone voice checks."))
-        capCard.addView(createCapItem("🔒 Deterministic Safety Boundary", "Output is validated by SafetyValidator before any SOS action."))
+        stageCard.addView(createCapItem("1️⃣ NORMAL", "Continuous 50Hz monitoring. Small movements stay normal."))
+        stageCard.addView(createCapItem("2️⃣ MINOR JERK", "Brief acceleration spike. Auto-decays in 1.5s."))
+        stageCard.addView(createCapItem("3️⃣ UNUSUAL MOVEMENT", "Sustained elevated signals. Requires 2+ consecutive windows."))
+        stageCard.addView(createCapItem("4️⃣ POSSIBLE IMPACT", "Strong force + rotation. Multi-signal confirmation."))
+        stageCard.addView(createCapItem("5️⃣ POSSIBLE INCIDENT", "Temporal pattern validated. Evidence accumulation."))
+        stageCard.addView(createCapItem("6️⃣ CONFIRMED INCIDENT", "Full multi-signal gate passed. Emergency countdown triggered."))
 
-        container.addView(capCard)
+        container.addView(stageCard)
+
+        // Safety Architecture
+        container.addView(sectionHeader("SAFETY ARCHITECTURE"))
+
+        val safetyCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF161922.toInt())
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+
+        safetyCard.addView(createCapItem("🔒 Sequential Escalation Only", "States can only progress one level at a time — no jumps."))
+        safetyCard.addView(createCapItem("⏱ Temporal Validation", "Each stage requires sustained evidence — single spikes auto-decay."))
+        safetyCard.addView(createCapItem("🛡️ SafetyValidator", "LLM output is advisory. Deterministic rules enforce safety boundaries."))
+
+        container.addView(safetyCard)
 
         scrollView.addView(container)
         tabContainer.addView(scrollView)
@@ -537,7 +555,10 @@ class MainActivity : AppCompatActivity() {
                         if (::tvHomeLiveStatus.isInitialized) {
                             when (state) {
                                 IncidentDecisionState.NORMAL -> tvHomeLiveStatus.setTextColor(0xFF81C784.toInt())
-                                IncidentDecisionState.SUSPICIOUS -> tvHomeLiveStatus.setTextColor(0xFFFFB74D.toInt())
+                                IncidentDecisionState.MINOR_JERK -> tvHomeLiveStatus.setTextColor(0xFFB0B8C8.toInt())
+                                IncidentDecisionState.UNUSUAL_MOVEMENT -> tvHomeLiveStatus.setTextColor(0xFFFFB74D.toInt())
+                                IncidentDecisionState.POSSIBLE_IMPACT -> tvHomeLiveStatus.setTextColor(0xFFFF9800.toInt())
+                                IncidentDecisionState.POSSIBLE_INCIDENT -> tvHomeLiveStatus.setTextColor(0xFFFF5722.toInt())
                                 IncidentDecisionState.CONFIRMED_INCIDENT -> tvHomeLiveStatus.setTextColor(0xFFFF5252.toInt())
                             }
                         }
