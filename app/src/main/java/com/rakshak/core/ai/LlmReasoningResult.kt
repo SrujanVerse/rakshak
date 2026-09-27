@@ -17,7 +17,10 @@ enum class RecommendedAction {
     DISPATCH_SMS,
     PROMPT_USER,
     LOG_ONLY,
-    CANCEL_ALERT
+    CANCEL_ALERT,
+    MONITOR,
+    VERIFY,
+    SEND_SOS
 }
 
 /**
@@ -28,7 +31,10 @@ enum class EventClassification {
     MINOR_MOVEMENT,
     UNUSUAL_MOVEMENT,
     INCONCLUSIVE,
-    POSSIBLE_INCIDENT
+    POSSIBLE_INCIDENT,
+    NO_INCIDENT,
+    MINOR_EVENT,
+    SERIOUS_INCIDENT
 }
 
 /**
@@ -57,7 +63,7 @@ data class LlmReasoningResult(
     companion object {
         /**
          * Safely parse LLM text output into [LlmReasoningResult].
-         * Supports both Qwen output contract keys ("classification", "severity", "action", "reason")
+         * Supports both Qwen output contract keys ("classification", "severity", "recommendedAction", "action", "reason")
          * and legacy keys ("recommended_action", "explanation", "report").
          */
         fun parseJson(jsonString: String): LlmReasoningResult? {
@@ -79,20 +85,33 @@ data class LlmReasoningResult(
                 }
                 cleaned = cleaned.substring(startIdx, endIdx + 1)
 
-                // 1. Classification
-                val classStr = (extractJsonValue(cleaned, "classification")
+                val actionVal = extractJsonValue(cleaned, "action")
+                    ?: extractJsonValue(cleaned, "recommendedAction")
+                    ?: extractJsonValue(cleaned, "recommended_action")
+                val severityVal = extractJsonValue(cleaned, "severity")
+                val classificationVal = extractJsonValue(cleaned, "classification")
                     ?: extractJsonValue(cleaned, "eventClassification")
-                    ?: "NORMAL").uppercase()
+                val reasonVal = extractJsonValue(cleaned, "reason")
+                    ?: extractJsonValue(cleaned, "explanation")
+
+                if (actionVal == null && severityVal == null && classificationVal == null && reasonVal == null) {
+                    return null
+                }
+
+                // 1. Classification
+                val classStr = (classificationVal ?: "NO_INCIDENT").uppercase()
                 val classification = when (classStr) {
-                    "MINOR", "MINOR_MOVEMENT", "MINOR_JERK" -> EventClassification.MINOR_MOVEMENT
+                    "NO_INCIDENT", "NORMAL" -> EventClassification.NO_INCIDENT
+                    "MINOR_EVENT", "MINOR", "MINOR_MOVEMENT", "MINOR_JERK" -> EventClassification.MINOR_EVENT
                     "UNUSUAL", "UNUSUAL_MOVEMENT" -> EventClassification.UNUSUAL_MOVEMENT
                     "INCONCLUSIVE", "UNCERTAIN" -> EventClassification.INCONCLUSIVE
-                    "POSSIBLE", "POSSIBLE_INCIDENT", "INCIDENT", "SERIOUS_INCIDENT" -> EventClassification.POSSIBLE_INCIDENT
-                    else -> EventClassification.NORMAL
+                    "POSSIBLE", "POSSIBLE_INCIDENT", "INCIDENT" -> EventClassification.POSSIBLE_INCIDENT
+                    "SERIOUS_INCIDENT", "CRITICAL_INCIDENT", "CONFIRMED" -> EventClassification.SERIOUS_INCIDENT
+                    else -> EventClassification.INCONCLUSIVE
                 }
 
                 // 2. Severity
-                val severityStr = extractJsonValue(cleaned, "severity")?.uppercase() ?: "MODERATE"
+                val severityStr = severityVal?.uppercase() ?: "MODERATE"
                 val severity = when (severityStr) {
                     "LOW" -> IncidentSeverity.LOW
                     "MEDIUM", "MODERATE" -> IncidentSeverity.MODERATE
@@ -102,28 +121,18 @@ data class LlmReasoningResult(
                 }
 
                 // 3. Recommended Action
-                val actionStr = (extractJsonValue(cleaned, "action")
-                    ?: extractJsonValue(cleaned, "recommended_action")
-                    ?: extractJsonValue(cleaned, "recommendedAction")
-                    ?: "PROMPT_USER").uppercase()
-
+                val actionStr = (actionVal ?: "PROMPT_USER").uppercase()
                 val recommendedAction = when (actionStr) {
                     "SEND_SOS", "DISPATCH_SMS", "SOS" -> RecommendedAction.DISPATCH_SMS
                     "ASK_USER", "PROMPT_USER", "VERIFY" -> RecommendedAction.PROMPT_USER
                     "CANCEL", "CANCEL_ALERT" -> RecommendedAction.CANCEL_ALERT
-                    "LOG_ONLY", "LOG", "MONITOR" -> RecommendedAction.LOG_ONLY
+                    "MONITOR", "LOG_ONLY", "LOG" -> RecommendedAction.LOG_ONLY
                     else -> RecommendedAction.PROMPT_USER
                 }
 
                 // 4. Explanation / Reason
-                val explanation = extractJsonValue(cleaned, "reason")
-                    ?: extractJsonValue(cleaned, "explanation")
-                    ?: extractJsonValue(cleaned, "assessment")
-                    ?: "Multi-sensor evidence analyzed."
-
-                val report = extractJsonValue(cleaned, "report")
-                    ?: explanation
-
+                val explanation = reasonVal ?: "Multi-sensor evidence analyzed."
+                val report = extractJsonValue(cleaned, "report") ?: explanation
                 val confidenceStr = extractJsonValue(cleaned, "confidence")
                 val confidence = confidenceStr?.toFloatOrNull() ?: 0.5f
 
